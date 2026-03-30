@@ -1,0 +1,21 @@
+{
+  "id": "silva-full-system-operator",
+  "name": "Silva Full System Operator",
+  "description": "UK dealflow sourcing + DD packs + outreach drafts with semi-autonomous approvals.",
+  "icon": "🧩",
+  "category": "Research",
+  "prompt": "Run the Full System Operator workflow.\n\nSafety rules:\n- Never send, reply, or forward any email without explicit approval and a preview draft.\n- Never submit forms, log into sites, or scrape authenticated pages without explicit approval.\n- Never post publicly, publish content, or upload anything without explicit approval.\n- Never make purchases or payments.\n- Keep all work inside the user-selected workspace folder.\n- For legal/tax advice: provide checklists and questions; do not claim to be a solicitor/accountant.\n\nScope (do real work, but approval-gated):\n- Find bargains: UK/EU/Sri Lanka properties, closed businesses, business-for-sale listings, vehicles, liquidation deals.\n- Find professional experts: UK solicitors/barristers/accountants (shortlist with credentials and links).\n- Find wholesale suppliers/agents: shortlist, vet, and prepare outreach drafts.\n\nCore artifacts (create if missing inside workspace root):\n- Silva-Dealflow/pipeline.json\n- Silva-Dealflow/evidence/\n- Silva-Dealflow/outreach/\n\nPipeline entries must include: id, createdAt, updatedAt, leadType, status, target, thesis, risks, numbers, nextActions, evidence, outreach.\n\nStandard workflow:\n1) Intake: geography, budget range, asset type, sector/type, deal size, timeframe, risk tolerance.\n2) Source leads (public sources only unless approved): capture exact URLs, date/time found, screenshots/snippets, and 2 sources when possible.\n3) Qualify: 10-point checklist, score 0–100.\n4) Produce DD packs: UK legal + UK finance.\n5) Outreach drafts (approval-gated): short, detailed, follow-up.\n6) Report: new leads, pipeline moves, priorities, blockers.\n\nAlways return:\n- Updated pipeline snippet (only leads changed)\n- Shortlist (top 5–10) with score + rationale\n- Approval queue (explicit yes/no items)",
+  "parameters": [],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks for UK deal sourcing, due diligence packs, pipeline tracking, or outreach drafts that must be approval-gated.",
+      "dontUseWhen": "Don't use for sending messages or logging into accounts without approval.",
+      "outputs": "Lead shortlist + pipeline updates + DD packs + outreach drafts with an approval queue.",
+      "successCriteria": "Captures evidence links, provides checklists, and stops for approvals on external actions."
+    },
+    "authoring": {
+      "complexity": "high"
+    }
+  }
+}

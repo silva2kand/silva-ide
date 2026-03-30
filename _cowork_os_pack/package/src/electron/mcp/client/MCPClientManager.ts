@@ -1,0 +1,517 @@
+/**
+ * MCPClientManager - Manages all MCP server connections
+ *
+ * This is the main interface for the MCP client functionality.
+ * It manages multiple server connections, aggregates tools,
+ * and routes tool calls to the appropriate server.
+ */
+
+import { EventEmitter } from "events";
+import {
+  MCPServerConfig,
+  MCPServerStatus,
+  MCPTool,
+  MCPCallResult,
+  MCPClientEvent,
+  MCPSettings as _MCPSettings,
+} from "../types";
+import { MCPSettingsManager } from "../settings";
+import { MCPServerConnection } from "./MCPServerConnection";
+import { IPC_CHANNELS } from "../../../shared/types";
+import { createLogger } from "../../utils/logger";
+import {
+  detectConnectorCapabilityId,
+  getKnownConnectorIds,
+  isConnectorConfiguredByCapability,
+} from "../connectors/capabilities";
+
+const KNOWN_CONNECTORS = new Set(getKnownConnectorIds());
+const logger = createLogger("MCPClientManager");
+
+function getAllElectronWindows(): Any[] {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+// oxlint-disable-next-line typescript-eslint(no-require-imports)
+    const electron = require("electron") as Any;
+    const BrowserWindow = electron?.BrowserWindow;
+    if (BrowserWindow?.getAllWindows) return BrowserWindow.getAllWindows();
+  } catch {
+    // Not running under Electron.
+  }
+  return [];
+}
+
+export class MCPClientManager extends EventEmitter {
+  private static instance: MCPClientManager | null = null;
+  private connections: Map<string, MCPServerConnection> = new Map();
+  private toolServerMap: Map<string, string> = new Map(); // tool name -> server id
+  private toolCatalogSnapshot: { version: number; tools: MCPTool[] } = { version: 0, tools: [] };
+  private initialized = false;
+  private isInitializing = false; // Flag to batch operations during startup
+  private rebuildToolMapDebounceTimer: NodeJS.Timeout | null = null;
+  private startupStats: { enabled: number; attempted: number; connected: number; failed: number } = {
+    enabled: 0,
+    attempted: 0,
+    connected: 0,
+    failed: 0,
+  };
+
+  private constructor() {
+    super();
+  }
+
+  /**
+   * Get singleton instance
+   */
+  static getInstance(): MCPClientManager {
+    if (!MCPClientManager.instance) {
+      MCPClientManager.instance = new MCPClientManager();
+    }
+    return MCPClientManager.instance;
+  }
+
+  /**
+   * Initialize the client manager and connect to enabled servers
+   */
+  async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    logger.info("Initializing...");
+    this.isInitializing = true;
+
+    // Initialize settings manager
+    MCPSettingsManager.initialize();
+
+    // Enter batch mode to defer all settings saves until initialization completes
+    MCPSettingsManager.beginBatch();
+
+    // Load settings
+    const settings = MCPSettingsManager.loadSettings();
+
+    // Auto-connect if enabled - connect in PARALLEL for faster startup
+    if (settings.autoConnect) {
+      const enabledServers = settings.servers.filter((s) => s.enabled);
+      const autoConnectServers: MCPServerConfig[] = [];
+      for (const server of enabledServers) {
+        if (this.shouldAutoConnect(server)) {
+          autoConnectServers.push(server);
+          continue;
+        }
+
+        const connectorId = this.detectConnectorId(server);
+        if (connectorId) {
+          // Keep persisted state aligned with behavior: unconfigured connectors stay disabled
+          // until credentials are provided and users explicitly enable/connect them.
+          MCPSettingsManager.updateServer(server.id, { enabled: false });
+        }
+      }
+      logger.info(
+        `Auto-connecting to ${autoConnectServers.length} enabled server(s) in parallel`,
+      );
+
+      const connectionPromises = autoConnectServers.map((server) =>
+        this.connectServer(server.id).catch((error) => {
+          logger.error(`Failed to auto-connect to ${server.name}:`, error);
+          return null; // Don't throw, allow other connections to continue
+        }),
+      );
+
+      await Promise.allSettled(connectionPromises);
+      const connected = autoConnectServers.filter(
+        (server) => this.connections.get(server.id)?.getStatus().status === "connected",
+      ).length;
+      const failed = autoConnectServers.length - connected;
+      this.startupStats = {
+        enabled: enabledServers.length,
+        attempted: autoConnectServers.length,
+        connected,
+        failed,
+      };
+      logger.info(
+        `Auto-connect summary: enabled=${enabledServers.length}, attempted=${autoConnectServers.length}, connected=${connected}, failed=${failed}`,
+      );
+    } else {
+      this.startupStats = { enabled: 0, attempted: 0, connected: 0, failed: 0 };
+    }
+
+    this.isInitializing = false;
+    this.initialized = true;
+
+    // Rebuild tool map once after all connections are established
+    this.rebuildToolMapImmediate();
+
+    // End batch mode - this will save settings once if any changes were made
+    MCPSettingsManager.endBatch();
+
+    logger.info("Initialized");
+  }
+
+  /**
+   * Shutdown and disconnect all servers
+   */
+  async shutdown(): Promise<void> {
+    logger.debug("Shutting down...");
+
+    // Clear debounce timer to prevent memory leaks
+    if (this.rebuildToolMapDebounceTimer) {
+      clearTimeout(this.rebuildToolMapDebounceTimer);
+      this.rebuildToolMapDebounceTimer = null;
+    }
+
+    const disconnectPromises = Array.from(this.connections.keys()).map((id) =>
+      this.disconnectServer(id).catch((error) =>
+        logger.error(`Error disconnecting ${id}:`, error),
+      ),
+    );
+
+    await Promise.all(disconnectPromises);
+    this.connections.clear();
+    this.toolServerMap.clear();
+    this.toolCatalogSnapshot = {
+      version: this.toolCatalogSnapshot.version + 1,
+      tools: [],
+    };
+    this.initialized = false;
+
+    logger.debug("Shutdown complete");
+  }
+
+  /**
+   * Connect to a specific server
+   */
+  async connectServer(serverId: string): Promise<void> {
+    // Check if already connected
+    if (this.connections.has(serverId)) {
+      const existing = this.connections.get(serverId)!;
+      if (existing.getStatus().status === "connected") {
+        logger.debug(`Server ${serverId} already connected`);
+        return;
+      }
+    }
+
+    // Get server config
+    const config = MCPSettingsManager.getServer(serverId);
+    if (!config) {
+      throw new Error(`Server ${serverId} not found`);
+    }
+
+    logger.debug(`Connecting to server: ${config.name}`);
+
+    // Get settings for reconnection config
+    const settings = MCPSettingsManager.loadSettings();
+
+    // Create connection
+    const connection = new MCPServerConnection(config, {
+      maxReconnectAttempts: settings.maxReconnectAttempts,
+      reconnectDelayMs: settings.reconnectDelayMs,
+    });
+
+    // Set up event handlers
+    this.setupConnectionHandlers(serverId, connection);
+
+    // Store connection
+    this.connections.set(serverId, connection);
+
+    // Connect
+    await connection.connect();
+
+    // Rebuild tool map (debounced during initialization)
+    this.rebuildToolMap();
+  }
+
+  /**
+   * Disconnect from a specific server
+   */
+  async disconnectServer(serverId: string): Promise<void> {
+    const connection = this.connections.get(serverId);
+    if (!connection) {
+      logger.debug(`Server ${serverId} not connected`);
+      return;
+    }
+
+    logger.debug(`Disconnecting from server: ${serverId}`);
+    await connection.disconnect();
+    this.connections.delete(serverId);
+
+    // Rebuild tool map
+    this.rebuildToolMap();
+  }
+
+  /**
+   * Get all available tools from all connected servers
+   */
+  getAllTools(): MCPTool[] {
+    return this.toolCatalogSnapshot.tools.map((tool) => ({
+      ...tool,
+      inputSchema: tool.inputSchema ? { ...tool.inputSchema } : tool.inputSchema,
+    }));
+  }
+
+  /**
+   * Get tools from a specific server
+   */
+  getServerTools(serverId: string): MCPTool[] {
+    const connection = this.connections.get(serverId);
+    if (!connection) {
+      return [];
+    }
+    return connection.getTools();
+  }
+
+  /**
+   * Check if a tool exists (by name)
+   */
+  hasTool(toolName: string): boolean {
+    return this.toolServerMap.has(toolName);
+  }
+
+  /**
+   * Call a tool by name
+   */
+  async callTool(toolName: string, args: Record<string, Any> = {}): Promise<MCPCallResult> {
+    const serverId = this.toolServerMap.get(toolName);
+    if (!serverId) {
+      throw new Error(`Tool ${toolName} not found`);
+    }
+
+    const connection = this.connections.get(serverId);
+    if (!connection) {
+      throw new Error(`Server ${serverId} not connected`);
+    }
+
+    return connection.callTool(toolName, args);
+  }
+
+  getToolCatalogVersion(): number {
+    return this.toolCatalogSnapshot.version;
+  }
+
+  /**
+   * Get status of all servers
+   */
+  getStatus(): MCPServerStatus[] {
+    const statuses: MCPServerStatus[] = [];
+    const settings = MCPSettingsManager.loadSettings();
+
+    for (const config of settings.servers) {
+      const connection = this.connections.get(config.id);
+      if (connection) {
+        statuses.push(connection.getStatus());
+      } else {
+        // Server not connected
+        statuses.push({
+          id: config.id,
+          name: config.name,
+          status: "disconnected",
+          error: config.lastError,
+          tools: config.tools || [],
+          lastPing: config.lastConnectedAt,
+        });
+      }
+    }
+
+    return statuses;
+  }
+
+  /**
+   * Get status of a specific server
+   */
+  getServerStatus(serverId: string): MCPServerStatus | null {
+    const connection = this.connections.get(serverId);
+    if (connection) {
+      return connection.getStatus();
+    }
+
+    // Check if server exists in settings
+    const config = MCPSettingsManager.getServer(serverId);
+    if (config) {
+      return {
+        id: config.id,
+        name: config.name,
+        status: "disconnected",
+        error: config.lastError,
+        tools: config.tools || [],
+        lastPing: config.lastConnectedAt,
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Test connection to a server (connect and disconnect)
+   */
+  async testServer(
+    serverId: string,
+  ): Promise<{ success: boolean; error?: string; tools?: number }> {
+    try {
+      await this.connectServer(serverId);
+      const status = this.getServerStatus(serverId);
+      const toolCount = status?.tools.length || 0;
+      await this.disconnectServer(serverId);
+
+      return { success: true, tools: toolCount };
+    } catch (error: Any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  getStartupStats(): { enabled: number; attempted: number; connected: number; failed: number } {
+    return { ...this.startupStats };
+  }
+
+  /**
+   * Set up event handlers for a connection
+   */
+  private setupConnectionHandlers(serverId: string, connection: MCPServerConnection): void {
+    connection.on("status_changed", (status, error) => {
+      logger.debug(`Server ${serverId} status: ${status}`, error || "");
+
+      // Update settings with last error
+      if (error) {
+        MCPSettingsManager.updateServerError(serverId, error);
+      } else if (status === "connected") {
+        MCPSettingsManager.updateServerError(serverId, undefined);
+      }
+
+      // Emit event
+      const event: MCPClientEvent = error
+        ? { type: "server_error", serverId, error }
+        : status === "connected"
+          ? { type: "server_connected", serverId, serverInfo: connection.getStatus().serverInfo! }
+          : status === "disconnected"
+            ? { type: "server_disconnected", serverId }
+            : status === "reconnecting"
+              ? { type: "server_reconnecting", serverId, attempt: 0 }
+              : { type: "server_disconnected", serverId };
+
+      if (status === "connected" || status === "disconnected" || status === "reconnecting") {
+        this.rebuildToolMap();
+      }
+
+      this.emit("event", event);
+
+      // Broadcast to renderer
+      this.broadcastStatusChange();
+    });
+
+    connection.on("tools_changed", (tools) => {
+      logger.debug(`Server ${serverId} tools changed: ${tools.length} tools`);
+
+      // Update settings with tools
+      MCPSettingsManager.updateServerTools(serverId, tools);
+
+      // Rebuild tool map
+      this.rebuildToolMap();
+
+      // Emit event
+      const event: MCPClientEvent = { type: "tools_changed", serverId, tools };
+      this.emit("event", event);
+
+      // Broadcast to renderer
+      this.broadcastStatusChange();
+    });
+
+    connection.on("error", (error) => {
+      logger.error(`Server ${serverId} error:`, error);
+    });
+  }
+
+  /**
+   * Rebuild the tool -> server mapping (debounced to avoid redundant rebuilds)
+   */
+  private rebuildToolMap(): void {
+    // During initialization, skip individual rebuilds - we'll do one at the end
+    if (this.isInitializing) {
+      return;
+    }
+
+    if (this.rebuildToolMapDebounceTimer) {
+      clearTimeout(this.rebuildToolMapDebounceTimer);
+      this.rebuildToolMapDebounceTimer = null;
+    }
+    this.rebuildToolMapImmediate();
+  }
+
+  /**
+   * Immediately rebuild the tool -> server mapping (no debounce)
+   */
+  private rebuildToolMapImmediate(): void {
+    const nextToolServerMap = new Map<string, string>();
+    const nextTools: MCPTool[] = [];
+
+    for (const [serverId, connection] of this.connections) {
+      if (connection.getStatus().status === "connected") {
+        for (const tool of connection.getTools()) {
+          if (nextToolServerMap.has(tool.name)) {
+            logger.warn(
+              `Tool name collision: ${tool.name} from ${serverId} conflicts with ${nextToolServerMap.get(tool.name)}`,
+            );
+          } else {
+            nextToolServerMap.set(tool.name, serverId);
+            nextTools.push({
+              ...tool,
+              inputSchema: tool.inputSchema ? { ...tool.inputSchema } : tool.inputSchema,
+            });
+          }
+        }
+      }
+    }
+
+    this.toolServerMap.clear();
+    for (const [toolName, serverId] of nextToolServerMap.entries()) {
+      this.toolServerMap.set(toolName, serverId);
+    }
+    this.toolCatalogSnapshot = {
+      version: this.toolCatalogSnapshot.version + 1,
+      tools: nextTools,
+    };
+
+    logger.debug(`Tool map rebuilt: ${this.toolServerMap.size} tools`);
+  }
+
+  /**
+   * Broadcast status change to all renderer windows
+   */
+  private broadcastStatusChange(): void {
+    const status = this.getStatus();
+    const windows = getAllElectronWindows();
+
+    for (const window of windows) {
+      if (!window.isDestroyed()) {
+        window.webContents.send(IPC_CHANNELS.MCP_SERVER_STATUS_CHANGE, status);
+      }
+    }
+  }
+
+  private shouldAutoConnect(server: MCPServerConfig): boolean {
+    const connectorId = this.detectConnectorId(server);
+    if (!connectorId) {
+      return true;
+    }
+
+    if (this.isConnectorConfigured(connectorId, server.env)) {
+      return true;
+    }
+
+    logger.debug(
+      `Skipping auto-connect for unconfigured connector: ${server.name} (${connectorId})`,
+    );
+    return false;
+  }
+
+  private detectConnectorId(server: MCPServerConfig): string | null {
+    const detected = detectConnectorCapabilityId(server);
+    if (!detected) return null;
+    return KNOWN_CONNECTORS.has(detected) ? detected : null;
+  }
+
+  private isConnectorConfigured(
+    connectorId: string,
+    env: Record<string, string> | undefined,
+  ): boolean {
+    return isConnectorConfiguredByCapability(connectorId, env);
+  }
+}

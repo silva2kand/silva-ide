@@ -1,0 +1,381 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  hardening-release-gate:
+    name: Hardening Release Gate
+    runs-on: ubuntu-latest
+    env:
+      HARDENING_REQUIRED_AFTER_UTC: '2026-03-14T00:00:00Z'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install sqlite3 CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sqlite3
+
+      - name: Run deterministic eval suite
+        id: run_eval_suite
+        continue-on-error: true
+        run: npm run qa:eval:run -- --suite reliability-regressions --mode deterministic
+        env:
+          COWORK_DB_PATH: ${{ runner.temp }}/cowork-release-eval.db
+
+      - name: Run battery suite when hooks are configured
+        id: run_battery
+        continue-on-error: true
+        env:
+          COWORK_HOOKS_ORIGIN: ${{ secrets.COWORK_HOOKS_ORIGIN }}
+          COWORK_HOOKS_TOKEN: ${{ secrets.COWORK_HOOKS_TOKEN }}
+          COWORK_DB_PATH: ${{ secrets.COWORK_DB_PATH }}
+        run: |
+          if [ -n "${COWORK_HOOKS_ORIGIN}" ] && [ -n "${COWORK_HOOKS_TOKEN}" ] && [ -n "${COWORK_DB_PATH}" ]; then
+            node scripts/qa/run_battery.cjs
+          else
+            echo "Battery skipped: set COWORK_HOOKS_ORIGIN, COWORK_HOOKS_TOKEN, and COWORK_DB_PATH secrets."
+          fi
+
+      - name: Enforce release hardening gate
+        env:
+          RUN_EVAL_OUTCOME: ${{ steps.run_eval_suite.outcome }}
+          RUN_BATTERY_OUTCOME: ${{ steps.run_battery.outcome }}
+        run: |
+          set -euo pipefail
+          now_epoch="$(date -u +%s)"
+          cutoff_epoch="$(date -u -d "${HARDENING_REQUIRED_AFTER_UTC}" +%s)"
+          strict_mode="false"
+          if [ "${now_epoch}" -ge "${cutoff_epoch}" ]; then
+            strict_mode="true"
+          fi
+
+          echo "Release hardening strict mode: ${strict_mode} (cutoff: ${HARDENING_REQUIRED_AFTER_UTC})"
+          echo "Outcomes: eval=${RUN_EVAL_OUTCOME} battery=${RUN_BATTERY_OUTCOME}"
+
+          if [ "${strict_mode}" != "true" ]; then
+            echo "Stability window active. Hardening failures do not block release."
+            exit 0
+          fi
+
+          if [ "${RUN_EVAL_OUTCOME}" != "success" ] || [ "${RUN_BATTERY_OUTCOME}" != "success" ]; then
+            echo "Release blocked: hardening gate failed after stability window."
+            exit 1
+          fi
+
+          echo "Release hardening gate passed."
+
+  release:
+    name: Release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    needs: hardening-release-gate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Force HTTPS for GitHub git dependencies
+        run: |
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Resolve release metadata
+        id: release_metadata
+        shell: bash
+        run: |
+          npm_version="$(node -p "require('./package.json').version")"
+
+          if [ "${GITHUB_REF_NAME}" != "${npm_version}" ] && [ "${GITHUB_REF_NAME}" != "v${npm_version}" ]; then
+            echo "Tag mismatch: GITHUB_REF_NAME=${GITHUB_REF_NAME} but package.json is ${npm_version}" >&2
+            exit 1
+          fi
+
+          release_tag="v${npm_version}"
+          if [ "${GITHUB_REF_NAME}" = "${npm_version}" ]; then
+            release_tag="v${npm_version}"
+          fi
+
+          echo "npm_version=${npm_version}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        if: runner.os != 'Windows'
+        run: npm test
+
+      - name: Validate published-package first-install flow
+        if: runner.os != 'Windows'
+        env:
+          CO_WORK_INSTALL_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
+        run: |
+          set -euo pipefail
+          repo_root="${GITHUB_WORKSPACE:-$(pwd)}"
+          tarball="$(npm pack --silent)"
+          tmp_dir="$(mktemp -d)"
+
+          if npm view "cowork-os@${CO_WORK_INSTALL_VERSION}" >/dev/null 2>&1; then
+            install_source="cowork-os@${CO_WORK_INSTALL_VERSION}"
+          else
+            install_source="${repo_root}/${tarball}"
+          fi
+
+          smoke_test() {
+            source_path="$1"
+            if [ -z "$source_path" ]; then
+              echo "Smoke test source is empty" >&2
+              exit 1
+            fi
+
+            test_dir="${tmp_dir}/smoke"
+            rm -rf "$test_dir"
+            mkdir -p "$test_dir"
+            cd "$test_dir"
+            npm init -y >/dev/null 2>&1
+            npm install --ignore-scripts --omit=optional --no-audit --no-fund "$source_path"
+            npm run --prefix node_modules/cowork-os setup 2>&1 | tee setup.log
+            if grep -q "^\\[cowork\\] setup:bootstrap" setup.log; then
+              echo "Setup unexpectedly triggered dependency bootstrap fallback; electron should resolve from parent node_modules." >&2
+              exit 1
+            fi
+            node -e "const { execFileSync } = require('node:child_process'); const { createRequire } = require('node:module'); const path = require('node:path'); const pkgDir = path.resolve('./node_modules/cowork-os'); const pkgRequire = createRequire(path.join(pkgDir, 'package.json')); const electron = pkgRequire('electron'); const out = execFileSync(electron, ['-e', \"const Database=require('better-sqlite3');const db=new Database(':memory:');db.close();console.log('ok')\"], { cwd: pkgDir, encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }); if ((out || '').trim() !== 'ok') { console.error('Installed package check failed; better-sqlite3 not loading in Electron.'); process.exit(1); }"
+          }
+
+          smoke_test "$install_source"
+
+          # Validate both install paths where possible (published registry package and local
+          # npm pack tarball), so we catch regressions in both command variants.
+          local_tgz="${repo_root}/${tarball}"
+          if [ "$install_source" != "$local_tgz" ]; then
+            smoke_test "$local_tgz"
+          fi
+
+      - name: Build application
+        run: npm run build
+
+      - name: Generate release notes from changelog
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const version = process.env.NPM_VERSION;
+          const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const marker = `## [${version}]`;
+          const start = changelog.indexOf(marker);
+
+          if (start === -1) {
+            fs.writeFileSync(
+              'release-notes.md',
+              `## ${version}\n\nNo changelog entry found for ${version}.\n`
+            );
+            process.exit(0);
+          }
+
+          const tail = changelog.slice(start + marker.length);
+          const nextMatch = tail.match(/\n## \[/);
+          const end = nextMatch ? start + marker.length + nextMatch.index : changelog.length;
+          const entry = changelog.slice(start, end).trim();
+          fs.writeFileSync('release-notes.md', `${entry}\n`);
+          NODE
+        env:
+          NPM_VERSION: ${{ steps.release_metadata.outputs.npm_version }}
+
+      - name: Prepare draft GitHub release for packaging
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          release_tag="${{ steps.release_metadata.outputs.release_tag }}"
+          npm_version="${{ steps.release_metadata.outputs.npm_version }}"
+          release_title="Release ${npm_version}"
+
+          # Handle parallel matrix jobs safely: create if missing, otherwise edit.
+          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Found existing release tag: ${release_tag}"
+            gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "${release_title}" --notes-file release-notes.md --draft=true
+          elif gh release create "${release_tag}" --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "${release_title}" --notes-file release-notes.md --draft; then
+            echo "Created draft release: ${release_tag}"
+          else
+            echo "Release create failed (likely concurrent create); retrying edit."
+            gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "${release_title}" --notes-file release-notes.md --draft=true
+          fi
+
+          echo "Cowork release draft prepared: ${release_tag}"
+
+      - name: Prepare package.json for electron-builder
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.dependencies = pkg.dependencies || {};
+            pkg.devDependencies = pkg.devDependencies || {};
+            for (const dep of ['electron', '@electron/rebuild']) {
+              if (pkg.dependencies[dep]) {
+                pkg.devDependencies[dep] = pkg.dependencies[dep];
+                delete pkg.dependencies[dep];
+              }
+            }
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Package and publish Electron app
+        run: npm run package
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # unsigned macOS build publishing to GitHub releases
+
+      - name: Verify expected desktop artifacts exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            windows_artifacts=(release/*.exe)
+            if [ "${#windows_artifacts[@]}" -eq 0 ]; then
+              echo "No Windows installer (.exe) found in release/." >&2
+              exit 1
+            fi
+            printf 'Windows artifacts:\n'
+            printf '  %s\n' "${windows_artifacts[@]}"
+          fi
+          if [ "${RUNNER_OS}" = "macOS" ]; then
+            mac_artifacts=(release/*.dmg)
+            if [ "${#mac_artifacts[@]}" -eq 0 ]; then
+              echo "No macOS installer (.dmg) found in release/." >&2
+              exit 1
+            fi
+            printf 'macOS artifacts:\n'
+            printf '  %s\n' "${mac_artifacts[@]}"
+          fi
+
+      - name: Upload release artifacts explicitly
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          release_tag="${{ steps.release_metadata.outputs.release_tag }}"
+          artifacts=(release/*.exe release/*.dmg release/*.zip release/*.yml release/*.blockmap)
+          if [ "${#artifacts[@]}" -eq 0 ]; then
+            echo "No release artifacts found to upload." >&2
+            exit 1
+          fi
+          for artifact in "${artifacts[@]}"; do
+            [ -f "${artifact}" ] || continue
+            echo "Uploading ${artifact}"
+            gh release upload "${release_tag}" "${artifact}" --repo "${GITHUB_REPOSITORY}" --clobber
+          done
+
+      - name: Publish draft GitHub release
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          release_tag="${{ steps.release_metadata.outputs.release_tag }}"
+          gh release edit "${release_tag}" --draft=false --repo "${GITHUB_REPOSITORY}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-npm:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: release
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Force HTTPS for GitHub git dependencies
+        run: |
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Setup Node.js for npm
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-github-packages:
+    name: Publish to GitHub Packages
+    runs-on: ubuntu-latest
+    needs: release
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Force HTTPS for GitHub git dependencies
+        run: |
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Setup Node.js for GitHub Packages
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@cowork-os'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+
+      - name: Update package name for GitHub Packages
+        run: |
+          # GitHub Packages requires scoped package names
+          node -e "
+            const pkg = require('./package.json');
+            pkg.name = '@cowork-os/cowork-os';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

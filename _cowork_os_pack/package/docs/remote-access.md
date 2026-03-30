@@ -1,0 +1,320 @@
+# Remote Access Guide
+
+CoWork OS provides multiple options for remote access to your Control Plane, allowing you to manage tasks, monitor progress, and interact with agents from anywhere.
+
+Remote access is now also the foundation for the desktop **Devices** tab. The same Control Plane connection can be saved as a managed remote device, letting you:
+
+- connect and reconnect a remote CoWork node from the desktop UI
+- launch tasks on that machine
+- inspect remote task history in a remote session view
+- browse remote workspaces
+- attach files directly from the remote filesystem before dispatching a task
+
+## Overview
+
+The Control Plane WebSocket server binds to `127.0.0.1:18789` by default for security. For remote access, you have three options:
+
+| Method | Use Case | Setup Complexity |
+|--------|----------|------------------|
+| **SSH Tunnel** | Personal use, existing SSH infrastructure | Low |
+| **Tailscale Serve** | Private network access (Tailnet only) | Medium |
+| **Tailscale Funnel** | Public internet access | Medium |
+
+When the server is running, it also serves a minimal web dashboard at `/` (same host/port).
+This is useful for headless/VPS setups: open the URL in a browser (via tunnel/Tailscale), paste the token, and manage tasks, approvals, and pending structured input requests.
+It also includes basic workspace, channel, and account management so you can bring up a fresh VPS without a desktop UI.
+
+## Finding the Remote Address
+
+Before connecting from your main CoWork machine, determine the address that is actually reachable from the client.
+
+### Same Local Network
+
+If the remote machine is a Mac mini, laptop, or VM on the same LAN:
+
+1. Enable **Allow LAN Connections** in CoWork Settings > Control Plane.
+2. On the remote machine, find its local IP:
+
+```bash
+ifconfig | grep "inet "
+```
+
+3. Use the private LAN address, usually something like:
+   - `192.168.x.x`
+   - `10.x.x.x`
+   - `172.16.x.x` to `172.31.x.x`
+4. Do not use:
+   - `127.0.0.1` because that is loopback on the remote machine only
+   - `0.0.0.0` because that is a bind address, not a destination address
+
+Example:
+
+```text
+ws://192.168.64.4:18789
+```
+
+### Public / External Network
+
+If the remote machine is not on the same local network:
+
+- Preferred: use **Tailscale** and connect with the Tailscale hostname / `wss://` URL
+- Safe fallback: use an **SSH tunnel** and connect locally to `ws://127.0.0.1:18789`
+- Direct public IP is possible, but only if you intentionally expose the port and protect it with firewall rules, TLS, and a strong token
+
+If you are using a VPS or another network you do not fully control, prefer Tailscale or SSH tunnel over a raw public WebSocket endpoint.
+
+## SSH Tunnel (Recommended for Personal Use)
+
+SSH tunnels provide secure remote access using standard SSH port forwarding. This is ideal if you already have SSH access to the machine running CoWork.
+
+### Prerequisites
+
+- SSH access to the remote machine running CoWork
+- Control Plane enabled (desktop Settings UI, or headless flags/env like `node bin/coworkd.js` or `node bin/coworkd-node.js`)
+- Authentication token available (printed on first generation, or via `--print-control-plane-token`)
+
+### Setup
+
+1. **Enable Control Plane** in CoWork Settings > Control Plane
+   - Headless: start with `node bin/coworkd.js` (headless Electron) or `node bin/coworkd-node.js` (Node-only)
+2. **Note your token** (copy it for client configuration)
+3. **Create SSH tunnel** from your local machine:
+
+```bash
+# Basic SSH tunnel
+ssh -N -L 18789:127.0.0.1:18789 user@remote-host
+
+# With keep-alive for long sessions
+ssh -N -L 18789:127.0.0.1:18789 -o ServerAliveInterval=60 user@remote-host
+
+# Background mode
+ssh -fN -L 18789:127.0.0.1:18789 user@remote-host
+```
+
+4. **Connect your client** to `ws://127.0.0.1:18789` with your token
+
+### SSH Tunnel Options
+
+| Flag | Description |
+|------|-------------|
+| `-N` | Don't execute remote commands (tunnel only) |
+| `-L` | Local port forwarding |
+| `-f` | Run in background |
+| `-o ServerAliveInterval=60` | Keep connection alive |
+
+### Custom Port
+
+If you've configured a different port in CoWork:
+
+```bash
+# Replace 18789 with your configured port
+ssh -N -L <local-port>:127.0.0.1:<remote-port> user@remote-host
+```
+
+### Persistent Tunnel with autossh
+
+For automatic reconnection, use `autossh`:
+
+```bash
+# Install autossh
+brew install autossh  # macOS
+apt install autossh   # Debian/Ubuntu
+
+# Create persistent tunnel
+autossh -M 0 -N -L 18789:127.0.0.1:18789 \
+  -o "ServerAliveInterval=30" \
+  -o "ServerAliveCountMax=3" \
+  user@remote-host
+```
+
+## Tailscale Integration
+
+Tailscale provides zero-config VPN networking. CoWork supports two modes:
+
+### Tailscale Serve (Private Network)
+
+Exposes your Control Plane to devices on your Tailnet only.
+
+1. **Install Tailscale** from [tailscale.com](https://tailscale.com)
+2. **Connect to your Tailnet**: `tailscale up`
+3. **Enable in CoWork**: Settings > Control Plane > Tailscale Mode > "Serve"
+4. **Access via**: `wss://<hostname>.<tailnet>.ts.net`
+
+### Tailscale Funnel (Public Internet)
+
+Exposes your Control Plane to the public internet (requires Tailscale subscription).
+
+1. **Enable Funnel** on your Tailscale account
+2. **Enable in CoWork**: Settings > Control Plane > Tailscale Mode > "Funnel"
+3. **Access via**: `wss://<hostname>.<tailnet>.ts.net` from anywhere
+
+## Security Considerations
+
+### Best Practices
+
+1. **Keep gateway loopback-only**: Never bind to `0.0.0.0` unless absolutely necessary
+2. **Use strong tokens**: CoWork generates 256-bit tokens by default
+3. **Rotate tokens regularly**: Use the "Regenerate Token" button periodically
+4. **Enable TLS**: Use `wss://` over public networks (automatic with Tailscale)
+5. **Rate limiting**: CoWork automatically blocks IPs after 5 failed auth attempts
+
+### Authentication Flow
+
+```
+Client                              CoWork Control Plane
+  │                                        │
+  │  ─────── WebSocket Connect ──────────► │
+  │                                        │
+  │  ◄────── Challenge (nonce) ─────────── │
+  │                                        │
+  │  ─────── Connect { token } ──────────► │
+  │                                        │
+  │  ◄────── Success + Client ID ───────── │
+  │                                        │
+  │  ═══════ Authenticated Session ═══════ │
+```
+
+### Token Storage
+
+- Tokens are encrypted using the OS keychain (via Electron's safeStorage)
+- Never share tokens in plain text
+- Use environment variables or secure vaults for automation
+
+## Client Configuration
+
+### Example: Node.js Client
+
+```javascript
+const WebSocket = require('ws');
+
+const ws = new WebSocket('ws://127.0.0.1:18789');
+
+ws.on('open', () => {
+  // Send connect request with token
+  ws.send(JSON.stringify({
+    type: 'req',
+    id: '1',
+    method: 'connect',
+    params: {
+      token: 'your-token-here',
+      deviceName: 'My CLI Client'
+    }
+  }));
+});
+
+ws.on('message', (data) => {
+  const frame = JSON.parse(data);
+  console.log('Received:', frame);
+});
+```
+
+### Example: Python Client
+
+```python
+import asyncio
+import websockets
+import json
+
+async def connect():
+    uri = "ws://127.0.0.1:18789"
+    async with websockets.connect(uri) as ws:
+        # Authenticate
+        await ws.send(json.dumps({
+            "type": "req",
+            "id": "1",
+            "method": "connect",
+            "params": {
+                "token": "your-token-here",
+                "deviceName": "Python Client"
+            }
+        }))
+
+        response = await ws.recv()
+        print(f"Response: {response}")
+
+asyncio.run(connect())
+```
+
+## Remote Client Mode (Connecting to Remote CoWork)
+
+CoWork can also operate as a client connecting to a remote Control Plane. This is useful when you want to use a local CoWork instance to manage tasks on a remote machine.
+
+### Configuration
+
+In Settings > Control Plane > Remote Connection:
+
+| Setting | Description |
+|---------|-------------|
+| **Gateway URL** | WebSocket URL (e.g., `ws://127.0.0.1:18789` via SSH tunnel) |
+| **Token** | Control Plane authentication token from the remote machine |
+| **Device name** | Human-readable label shown in the Devices tab |
+| **Purpose** | Optional remote-device role hint used in device cards and task routing |
+
+### Devices tab workflow
+
+Once the remote endpoint is reachable:
+
+1. Open the desktop **Devices** tab.
+2. Click **Add new device**.
+3. Enter the gateway URL, token, device name, and optional purpose.
+4. Save and connect the device.
+5. Select the device to:
+   - run a task remotely
+   - list remote workspaces
+   - attach files from a remote workspace
+   - inspect tasks, alerts, apps, storage, and device details
+
+When you open a remote task from that tab, CoWork shows a remote-session banner so you can tell you are reviewing another machine's task history rather than the local machine's active session.
+| **TLS Fingerprint** | (Optional) Certificate pin for `wss://` connections |
+
+### Examples
+
+- Same network Mac mini or laptop: `ws://192.168.1.25:18789`
+- Same host over SSH tunnel: `ws://127.0.0.1:18789`
+- Tailscale: `wss://my-mac.tailnet-name.ts.net`
+
+### Connection Modes
+
+| Mode | Description |
+|------|-------------|
+| **Local** | This CoWork instance runs the Control Plane server |
+| **Remote** | Connect to a Control Plane on another machine |
+
+## Troubleshooting
+
+### SSH Tunnel Issues
+
+**Connection refused:**
+```bash
+# Check if CoWork is running and Control Plane is enabled
+curl http://127.0.0.1:18789/health
+```
+
+**Tunnel disconnects:**
+```bash
+# Use keep-alive options
+ssh -N -L 18789:127.0.0.1:18789 \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  user@remote-host
+```
+
+### Authentication Failures
+
+**"Too many failed attempts":**
+- Wait 5 minutes (automatic ban expires)
+- Or restart the Control Plane server
+
+**"Invalid token":**
+- Verify token matches the one in CoWork settings
+- Check for extra whitespace when copying
+
+### Tailscale Issues
+
+**"Funnel not available":**
+- Ensure you have a Tailscale subscription with Funnel enabled
+- Run `tailscale serve status` to check configuration
+
+## API Reference
+
+Protocol reference (methods/events/error codes) lives in `src/electron/control-plane/protocol.ts`.

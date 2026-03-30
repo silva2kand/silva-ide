@@ -1,0 +1,40 @@
+{
+  "id": "silva-last-x-days-research",
+  "name": "Last X Days Research (Silva)",
+  "description": "Research a topic from the past X days using web search with the exact term.",
+  "icon": "🔬",
+  "category": "Research",
+  "prompt": "Research \"{{topic}}\" from the past {{days}} days.\n\nIMPORTANT:\n- Use the EXACT search term \"{{topic}}\" as provided. Do NOT interpret, correct, or modify it.\n- Do NOT navigate to login-required sites.\n\nDetermine dateRange for web_search from {{days}}:\n- 1 => \"day\"\n- 2-7 => \"week\"\n- 8-30 => \"month\"\n- 31+ => \"year\"\n\nINSTRUCTIONS:\n1) Use web_search with the chosen dateRange.\n2) Run multiple targeted searches:\n   - web_search(query: \"{{topic}} news\", dateRange: <determined>)\n   - web_search(query: \"{{topic}} site:reddit.com\", dateRange: <determined>)\n   - web_search(query: \"{{topic}} discussion\", dateRange: <determined>)\n   - web_search(query: \"{{topic}} announcement\", dateRange: <determined>)\n3) Analyze:\n   - Breaking news and recent announcements\n   - Common themes and patterns\n   - Popular opinions and best practices\n   - Notable developments or changes\n   - Engagement metrics where visible\n\nIf web_search is not configured, fall back to web_fetch with known URLs.\n\nTarget tool context: {{tool}}\n\nOUTPUT:\n- Summary of key findings from the past {{days}} days\n- Notable trends or patterns discovered\n- Common themes from community discussions\n- 3-5 ready-to-use prompts based on what's working (tailored to {{tool}})\n- Tips and techniques from real users\n- Links to notable discussions for reference",
+  "parameters": [
+    {
+      "name": "topic",
+      "type": "string",
+      "description": "Exact topic to research",
+      "required": true
+    },
+    {
+      "name": "days",
+      "type": "number",
+      "description": "Number of days to look back (defaults to 7)",
+      "required": false
+    },
+    {
+      "name": "tool",
+      "type": "string",
+      "description": "Target tool context for prompts (optional)",
+      "required": false
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks for research limited to the last N days and wants recent news/discussions.",
+      "dontUseWhen": "Don't use for evergreen topics where time-windowed research is not requested.",
+      "outputs": "Time-windowed research summary with links and ready-to-use prompts.",
+      "successCriteria": "Uses exact search term, uses dateRange properly, and returns links and concrete findings."
+    },
+    "authoring": {
+      "complexity": "low"
+    }
+  }
+}

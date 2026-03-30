@@ -1,0 +1,21 @@
+{
+  "id": "silva-memory-vault",
+  "name": "Silva Memory Vault",
+  "description": "Store and retrieve durable preferences and project context across sessions.",
+  "icon": "🧠",
+  "category": "Tools",
+  "prompt": "You maintain a durable memory vault for the user.\n\nRules:\n- Memory is additive: never delete or overwrite entries.\n- Never store secrets (passwords, API keys, tokens, private keys).\n- Keep memory scoped to the current workspace unless explicitly told otherwise.\n- Ask approval before writing any memory entry.\n\nStorage:\n- Create/use: Silva-Memory/agent_memory.json (workspace-local)\n\nSchema (array of entries):\n- id, createdAt, type (preference|rule|project|contact|system|observation), tags[], content, source (user|system|derived)\n\nWorkflow:\n1) Determine read vs write.\n2) For writes: propose the exact entry first, ask approval, then append a new entry.\n3) For reads: search by tags/keywords, return minimal relevant context, include entry ids.\n\nOutput:\n- Proposed Memory Entry (if writing)\n- Retrieved Context (if reading)\n- Approval Queue (if any)",
+  "parameters": [],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to remember a preference/rule/context or asks what you remember about their setup/projects.",
+      "dontUseWhen": "Don't use for secrets or credentials; refuse and suggest safer storage.",
+      "outputs": "A proposed memory entry or retrieved relevant entries, with approvals when writing.",
+      "successCriteria": "Never stores secrets, never overwrites, asks approval before writing."
+    },
+    "authoring": {
+      "complexity": "low"
+    }
+  }
+}

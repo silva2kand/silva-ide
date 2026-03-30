@@ -1,0 +1,506 @@
+# Getting Started with CoWork OS
+
+## Quick Start
+
+### Step 1: Install Dependencies
+
+```bash
+git clone https://github.com/CoWork-OS/CoWork-OS.git
+cd CoWork-OS
+npm run setup
+```
+
+### Step 2: Run the App
+
+```bash
+npm run dev
+```
+
+This will:
+1. Start the Vite dev server (React UI)
+2. Launch Electron with hot reload enabled
+3. Open DevTools automatically
+
+### Step 3: Configure Your LLM Provider
+
+1. Click the **Settings** icon (gear) in the sidebar
+2. Choose your LLM provider:
+   - **Anthropic** - Claude models (requires API key from [console.anthropic.com](https://console.anthropic.com))
+   - **Google Gemini** - Gemini models (requires API key from [aistudio.google.com](https://aistudio.google.com/apikey))
+   - **OpenRouter** - Multiple models (requires API key from [openrouter.ai](https://openrouter.ai/keys))
+   - **OpenAI** - GPT-4o, o1 models (requires API key from [platform.openai.com](https://platform.openai.com/api-keys))
+   - **AWS Bedrock** - Enterprise AWS (requires AWS credentials)
+   - **Ollama** - Local models (free, requires [Ollama](https://ollama.ai) installed)
+3. Enter your API key
+4. Click **Test Connection** to verify
+5. Save settings
+
+## Troubleshooting
+
+- If **Test Connection** fails with 401/403, verify the API key and account permissions.
+- If the model list is empty, click **Refresh Models** after entering your API key (and Base URL if overridden).
+- If a provider endpoint changes, override the **Base URL** in Settings (custom providers or Groq/xAI/Kimi/OpenRouter).
+- If Ollama fails to connect, confirm the service is running and the base URL is correct (default `http://localhost:11434`).
+- If `npm run setup` fails on macOS with `Killed: 9`, macOS terminated the native build due to memory pressure. The setup script retries automatically (with exponential backoff); if it still fails, close other apps and run `npm run setup` again.
+
+### Step 4: Create Your First Task
+
+1. **Select a Workspace**
+   - Click "Select Folder"
+   - Choose a folder you want CoWork OS to work in
+   - This will be your workspace (e.g., `~/Documents/test-workspace`)
+
+2. **Initialize the Workspace Kit (Optional, Recommended)**
+   - Open **Settings** > **Memory Hub**
+   - Under **Workspace Kit**, click **Initialize**
+   - This creates a `.cowork/` directory in your workspace for durable context, prompt injection, and project scaffolding
+   - The root kit can include shared workspace files such as `AGENTS.md`, `USER.md`, `MEMORY.md`, `TOOLS.md`, `IDENTITY.md`, `RULES.md`, `SOUL.md`, `VIBES.md`, and `LORE.md`
+   - `BOOTSTRAP.md` is a one-time onboarding checklist; once you complete onboarding, removing it marks onboarding complete and CoWork OS tracks that state in `.cowork/workspace-state.json`
+   - `HEARTBEAT.md` is reserved for recurring heartbeat-only checks rather than general task context
+   - Project-specific context lives under `.cowork/projects/<projectId>/`, where `CONTEXT.md` captures project notes and `ACCESS.md` captures project access boundaries
+   - Changes to tracked kit files keep revision snapshots under `.cowork/**/.history/`
+   - You can validate kit health, freshness, and secret/missing-file warnings locally with `npm run kit:lint`
+
+2. **Create a Task**
+   - Click "+ New Task"
+   - Title: "Organize my files"
+   - Description: "Please organize all files in this folder by file type (Images, Documents, etc.)"
+   - Click "Create Task"
+
+3. **Watch it Work**
+   - The agent will create a plan
+   - Execute steps using available tools
+   - Show real-time progress in the timeline
+   - Request approval before destructive changes
+
+## Orientation: Where The New Product Surfaces Live
+
+Once the app opens, the most important places to know are:
+
+- **Home**: quick launch plus recent sessions and recent automation activity
+- **Devices**: manage the local machine and saved remote CoWork nodes, run remote tasks, and inspect remote task history
+- **Settings > Automations**: Task Queue, Self-Improve, Scheduled Tasks, Webhooks, Event Triggers, and Daily Briefing
+- **Settings > Companies**: company shell setup, goals, projects, issues, planner state, and linked operators
+- **Mission Control**: company and operator monitoring, Kanban board, feed, and Ops view
+
+If you are just getting started, do not configure everything at once. Set up an LLM provider, run one local task, then add Devices, Automations, or Companies as needed.
+
+## Optional: Add A Remote Device
+
+Use this when you want CoWork OS to run tasks on another machine, such as a Mac mini or remote workstation.
+
+1. Start CoWork on the remote machine and enable the Control Plane.
+2. Decide how you will reach it:
+   - same LAN
+   - SSH tunnel
+   - Tailscale
+3. On your main machine, open the **Devices** tab.
+4. Click **Add new device**.
+5. Enter the gateway URL, token, display name, and purpose.
+6. Connect the device and confirm it appears in the device list.
+7. Select that device and run a small test task.
+
+After connection, you can browse remote workspaces, attach files from the remote machine, and inspect remote task history from the same Devices surface.
+
+## Optional: Turn On Automations
+
+Open **Settings > Automations** when you want CoWork OS to do background work without manually starting every task.
+
+Recommended order:
+
+1. **Task Queue**: confirm concurrency and timeout defaults.
+2. **Scheduled Tasks**: add one safe recurring task.
+3. **Daily Briefing**: enable a daily summary.
+4. **Event Triggers / Webhooks**: connect inbound automation only after you have a stable workspace and provider setup.
+5. **Self-Improve**: enable only on git-backed workspaces where worktrees are available.
+
+## Zero-Human Company Quick Start
+
+If you want to use CoWork OS as a founder-operated autonomous company shell:
+
+1. Choose a real git-backed workspace.
+2. Open **Settings** > **Memory Hub**.
+3. Initialize **Venture operator kit**.
+4. Fill in the generated `.cowork/` company files (`COMPANY.md`, `OPERATIONS.md`, `KPIS.md`, `PRIORITIES.md`, `HEARTBEAT.md`).
+5. Open **Settings** > **Companies**.
+6. Create or select the company shell you want to operate.
+7. Click **Open Digital Twins** from that company.
+8. Activate:
+   - `Company Planner`
+   - `Founder Office Operator`
+9. Enable heartbeat for both operators.
+10. Return to **Settings** > **Companies** and confirm the operators are linked to the intended company.
+11. Open **Mission Control** from that company.
+12. In the planner strip, enable scheduling, set the planner agent, and click **Run Planner**.
+13. Use the `Ops` tab to monitor goals, projects, planner-managed issues, and linked execution runs.
+
+See [Zero-Human Company Operations](zero-human-company.md) for the full architecture, recipe, use cases, and operating model.
+
+## Example Tasks to Try
+
+### 1. File Organization
+
+```
+Title: Organize Downloads
+Description: Organize all files in this folder by type. Create folders for Images, Documents, Spreadsheets, and Other. Move files into appropriate folders.
+```
+
+### 2. Create a Spreadsheet
+
+```
+Title: Create sales report
+Description: Create an Excel spreadsheet with monthly sales data for Q1-Q4. Include columns for Month, Revenue, Expenses, and Profit. Add a summary row with totals.
+```
+
+### 3. Create a Document
+
+```
+Title: Write project summary
+Description: Create a Word document summarizing our project. Include sections for Overview, Goals, Timeline, and Next Steps. Use professional formatting.
+```
+
+### 4. Create a Presentation
+
+```
+Title: Create quarterly report
+Description: Create a PowerPoint presentation with 5 slides covering Q1 2024 highlights. Include: Title slide, Overview, Key Metrics, Challenges, and Next Steps.
+```
+
+### 5. Web Research (works out of the box; optional paid providers for richer results)
+
+```
+Title: Research AI trends
+Description: Search the web for the latest trends in AI for 2024 and create a summary document with the top 5 findings.
+```
+
+### 6. Browser Automation
+
+```
+Title: Screenshot a webpage
+Description: Navigate to https://example.com and take a screenshot. Save it as example-screenshot.png.
+```
+
+## Understanding the UI
+
+### Sidebar (Left)
+
+- **Workspace Info**: Shows current workspace name and path
+- **Settings Button**: Configure LLM, search, and channel settings
+- **New Task Button**: Create a new task
+- **Task List**: All tasks sorted by creation date
+- **Task Status Indicators**:
+  - Blue = Active (planning/executing)
+  - Green = Completed
+  - Red = Failed/Cancelled
+  - Gray = Pending
+
+### Task View (Right)
+
+- **Task Header**: Title and metadata
+- **Task Description**: What you asked for
+- **Activity Timeline**: Real-time execution log showing:
+  - Task created
+  - Plan created
+  - Steps started/completed
+  - Tool calls
+  - Files created/modified
+  - Errors
+
+### Approval Dialogs
+
+When the agent needs permission for:
+- Deleting files
+- Bulk operations
+- Shell commands
+
+You'll see a dialog with:
+- What it wants to do
+- Why it needs to do it
+- Approve or Deny buttons
+
+## Configuring Providers
+
+### LLM Providers
+
+Open **Settings** > **Provider** tab:
+
+| Provider | Setup |
+|----------|-------|
+| Anthropic | Enter API key from [console.anthropic.com](https://console.anthropic.com) |
+| Google Gemini | Enter API key from [aistudio.google.com](https://aistudio.google.com/apikey) |
+| OpenRouter | Enter API key from [openrouter.ai](https://openrouter.ai/keys) |
+| OpenAI (API Key) | Enter API key from [platform.openai.com](https://platform.openai.com/api-keys) |
+| OpenAI (ChatGPT) | Click "Sign in with ChatGPT" to use your subscription |
+| AWS Bedrock | Enter AWS Access Key, Secret Key, and Region |
+| Ollama | Install Ollama, pull a model, select it |
+| Groq | Enter API key in Settings |
+| xAI (Grok) | Enter API key in Settings |
+| Kimi (Moonshot) | Enter API key in Settings |
+
+### Compatible / Gateway Providers
+
+Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, model IDs, and base URLs when required.
+
+| Provider | Setup |
+|----------|-------|
+| OpenCode Zen | API key + base URL in Settings |
+| Google Vertex | Access token + base URL in Settings |
+| Google Antigravity | Access token + base URL in Settings |
+| Google Gemini CLI | Access token + base URL in Settings |
+| Z.AI | API key + base URL in Settings |
+| GLM | API key + base URL in Settings |
+| Vercel AI Gateway | API key in Settings |
+| Cerebras | API key in Settings |
+| Mistral | API key in Settings |
+| GitHub Copilot | GitHub token in Settings |
+| Moonshot (Kimi) | API key in Settings |
+| Qwen Portal | API key in Settings |
+| MiniMax | API key in Settings |
+| MiniMax Portal | API key in Settings |
+| Xiaomi MiMo | API key in Settings |
+| Venice AI | API key in Settings |
+| Synthetic | API key in Settings |
+| Kimi Code | API key in Settings |
+| OpenAI-Compatible (Custom) | API key + base URL in Settings |
+| Anthropic-Compatible (Custom) | API key + base URL in Settings |
+
+### Search Providers (Optional — DuckDuckGo works out of the box)
+
+Web search works immediately via the built-in DuckDuckGo provider (free, no API key). For richer results (news, images, AI-optimized ranking), configure a paid provider in **Settings** > **Web Search**:
+
+| Provider | Setup |
+|----------|-------|
+| DuckDuckGo | Built-in — no setup needed (automatic fallback) |
+| Tavily | Enter API key from [tavily.com](https://tavily.com) |
+| Brave | Enter API key from [brave.com/search/api](https://brave.com/search/api) |
+| SerpAPI | Enter API key from [serpapi.com](https://serpapi.com) |
+| Google | Enter API key and Search Engine ID from Google Cloud Console |
+
+### Channel Integrations (Optional)
+
+#### WhatsApp Bot
+1. Open **Settings** > **WhatsApp**
+2. Click **Add WhatsApp Channel**
+3. A QR code will appear
+4. Open WhatsApp on phone → **Settings** > **Linked Devices** > **Link a Device**
+5. Scan the QR code
+6. Once connected, enable **Self-Chat Mode** if using your personal number
+7. Set a **Response Prefix** (e.g., "🤖") to distinguish bot messages
+
+#### Telegram Bot
+1. Create bot with [@BotFather](https://t.me/BotFather)
+2. Open **Settings** > **Channels** > **Telegram**
+3. Enter bot token
+4. Enable and test
+
+#### Discord Bot
+1. Create app at [Discord Developer Portal](https://discord.com/developers/applications)
+2. Open **Settings** > **Channels** > **Discord**
+3. Enter bot token and application ID
+4. Invite bot to server
+5. Enable and test
+
+#### Slack Bot
+1. Create app at [Slack API Apps](https://api.slack.com/apps)
+2. Enable Socket Mode and create App-Level Token (xapp-...)
+3. Add OAuth scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`, `users:read`, `files:write`
+4. Subscribe to events: `app_mention`, `message.im`
+5. Install to workspace and copy Bot Token (xoxb-...)
+6. Open **Settings** > **Channels** > **Slack**
+7. Enter Bot Token and App-Level Token
+8. Enable and test
+
+### App Integrations (Optional)
+
+Open **Settings** > **Integrations** and click any card to configure productivity and storage tools:
+
+- **Notion** — search and manage pages
+- **Box** — search and manage files
+- **OneDrive** — search and manage files
+- **Google Workspace** (Gmail, Calendar, Drive) — shared OAuth
+- **Dropbox** — list, search, and manage files
+- **SharePoint** — search sites and manage drive items
+
+### Enterprise MCP Connectors (Optional)
+
+Install enterprise connectors from **Settings** > **Integrations** > **Browse Registry**:
+
+| Connector | Type | Setup |
+|-----------|------|-------|
+| **Salesforce** | CRM | OAuth or API key |
+| **Jira** | Issue Tracking | API token + domain |
+| **HubSpot** | CRM | API key |
+| **Zendesk** | Support | API key + subdomain |
+| **ServiceNow** | ITSM | OAuth or credentials |
+| **Linear** | Product/Issue | API key |
+| **Asana** | Work Management | Personal access token |
+| **Okta** | Identity | API token + domain |
+| **Discord** | Community | Bot token + application ID |
+| **Google Workspace** | Productivity | OAuth in-app flow |
+
+Each connector provides tools like `search`, `get`, `create`, and `update` for its respective service. **44 connectors** are available in total, including Stripe, Tavily, Grafana, Metabase, Socket, and more. See [Enterprise Connectors](enterprise-connectors.md) for the full catalog.
+
+### Social Integrations (Optional)
+
+#### X (Twitter)
+1. Open **Settings** > **X (Twitter)**
+2. Choose Browser Cookies or Manual Cookies
+3. (Optional) Enable **Mention Trigger** and configure:
+   - command prefix (default `do:`)
+   - allowlisted authors
+   - poll interval and fetch count
+4. Save and test the connection
+5. See [X Mention Triggers](x-mention-triggers.md) for bridge/native behavior and troubleshooting.
+
+## Development Workflow
+
+### Making Changes
+
+The app supports hot reload:
+
+1. **React UI Changes**: Edit files in `src/renderer/` - auto-refreshes
+2. **Electron Main Changes**: Edit files in `src/electron/` - auto-restarts
+3. **Shared Types**: Edit `src/shared/types.ts` - both reload
+
+### Project Structure
+
+```
+src/
+├── electron/          # Backend (Node.js)
+│   ├── main.ts       # App entry point
+│   ├── agent/        # AI agent logic
+│   │   ├── llm/      # LLM providers
+│   │   ├── search/   # Search providers
+│   │   ├── browser/  # Playwright
+│   │   ├── tools/    # Tool implementations
+│   │   └── skills/   # Document skills
+│   ├── gateway/      # WhatsApp, Telegram, Discord & Slack
+│   └── database/     # SQLite storage
+├── renderer/         # Frontend (React)
+│   ├── App.tsx       # Main component
+│   └── components/   # UI components
+└── shared/           # Shared between both
+    └── types.ts      # TypeScript types
+```
+
+### Debugging
+
+**Renderer Process (UI)**:
+- DevTools open automatically in dev mode
+- Use `console.log()` - shows in DevTools Console
+
+**Main Process (Backend)**:
+- Use `console.log()` - shows in terminal
+- Check logs:
+  - macOS: `~/Library/Application Support/cowork-os/`
+  - Windows: `%APPDATA%\\cowork-os\\`
+
+### Database
+
+SQLite database location:
+- macOS: `~/Library/Application Support/cowork-os/cowork-os.db`
+- Windows: `%APPDATA%\\cowork-os\\cowork-os.db`
+
+View it with any SQLite browser or:
+```bash
+# macOS
+sqlite3 ~/Library/Application\ Support/cowork-os/cowork-os.db
+.tables
+SELECT * FROM tasks;
+```
+
+```powershell
+# Windows (PowerShell)
+sqlite3 "$env:APPDATA\cowork-os\cowork-os.db"
+.tables
+SELECT * FROM tasks;
+```
+
+## Building for Production
+
+```bash
+# Build both renderer and electron
+npm run build
+
+# Package desktop app
+npm run package
+```
+
+Output: `release/*.dmg` (macOS) and `release/*.exe` (Windows)
+
+## Common Issues
+
+### Issue: "No LLM provider configured"
+
+**Solution**: Open Settings (gear icon) and configure at least one LLM provider.
+
+### Issue: Electron won't start
+
+**Solution**: Clear and reinstall:
+```bash
+rm -rf node_modules dist
+npm run setup
+npm run dev
+```
+
+### Issue: "Permission denied" for workspace
+
+**Solution**: Choose a folder you have write access to, like:
+- `~/Documents/cowork-test`
+- `~/Downloads/test`
+
+Don't use system folders like `/System` or `/Applications`.
+
+### Issue: Tasks fail immediately
+
+**Solution**: Check:
+1. LLM provider is configured in Settings
+2. API key is valid
+3. Workspace has proper permissions
+4. Network connection for API calls
+5. Check console for error messages
+
+### Issue: Ollama connection failed
+
+**Solution**:
+1. Make sure Ollama is running: `ollama serve`
+2. Check URL is correct (default: `http://localhost:11434`)
+3. Make sure you've pulled a model: `ollama pull llama3.2`
+
+## Tips for Best Results
+
+1. **Be Specific**: Clear task descriptions work better
+2. **Start Small**: Test with a few files before bulk operations
+3. **Review Plans**: Check the execution plan before it runs
+4. **Respond Carefully**: Read approval requests and structured input prompts before accepting or submitting
+5. **Monitor Progress**: Watch the timeline to understand what's happening, especially when parallel tool groups collapse into summary lanes
+6. **Use Local Models**: Ollama is free and works offline
+
+## Next Steps
+
+### Try Advanced Features
+
+1. **Web Search**: Configure a search provider and ask research questions
+2. **Browser Automation**: Have the agent navigate websites and extract data
+3. **Remote Access**: Set up WhatsApp, Telegram, Discord, or Slack bot for mobile/remote access
+4. **Document Creation**: Create professional Excel, Word, PDF, or PowerPoint files
+5. **Goal Mode**: Define success criteria and let the agent auto-retry until verification passes
+6. **Custom Skills**: Create reusable workflows with custom prompts in Settings > Custom Skills
+7. **MCP Servers**: Connect to external tools via MCP in Settings > MCP Servers
+8. **Enterprise Connectors**: Install from 44 connectors (Salesforce, Jira, HubSpot, Stripe, Tavily, Grafana, and more) via Settings > Connectors
+9. **Cloud Storage**: Connect Notion, Box, OneDrive, Google Workspace (Gmail/Calendar/Drive), Dropbox, or SharePoint — click their cards in Settings > Integrations
+10. **Parallel Tasks**: Run multiple tasks concurrently (configure in Settings > Task Queue)
+11. **Guardrails**: Set token/cost budgets and blocked commands in Settings > Guardrails
+
+### Learn More
+
+- [Full README](README.md) - Complete documentation
+- [Implementation Summary](IMPLEMENTATION_SUMMARY.md) - Technical details
+- [Project Status](PROJECT_STATUS.md) - Feature status
+
+## Getting Help
+
+- Check console output for errors
+- Review the task timeline for clues
+- Read error messages in the UI
+- Report issues at [GitHub Issues](https://github.com/CoWork-OS/CoWork-OS/issues)

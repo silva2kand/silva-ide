@@ -1,0 +1,222 @@
+{
+  "approvalMode": "semi-autonomous",
+  "alwaysRequireApprovalFor": [
+    "send_email",
+    "reply_email",
+    "forward_email",
+    "add_email_account",
+    "remove_email_account",
+    "change_email_settings",
+    "post_publicly",
+    "publish_content",
+    "upload_files",
+    "download_files",
+    "open_external_links",
+    "run_commands",
+    "install_dependencies",
+    "share_private_data",
+    "sign_document",
+    "pay_money",
+    "purchase",
+    "place_order",
+    "submit_form",
+    "login_to_sites",
+    "scrape_authenticated_pages",
+    "change_account_settings",
+    "delete_files",
+    "run_destructive_commands"
+  ],
+  "preferredLLM": {
+    "localFirst": true,
+    "ccsAutoCommand": "ccs-auto",
+    "defaultProfile": "lmstudio-qwen35-27b-opus46",
+    "fallbackProfiles": [
+      "ollama-qwen35-35b-opus46",
+      "lmstudio-qwen35-9b-opus46"
+    ]
+  },
+  "dealflow": {
+    "defaultWorkspaceFolderName": "Silva-Dealflow",
+    "pipelineFile": "pipeline.json",
+    "evidenceFolder": "evidence",
+    "outreachFolder": "outreach"
+  },
+  "ukFocus": {
+    "jurisdiction": "UK",
+    "property": {
+      "includeCommercialPremises": true,
+      "includeLeasehold": true
+    }
+  },
+  "emailAccounts": {
+    "google": [
+      {
+        "name": "Gmail - NewtonStore0 (MAIN)",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "newtonstore0@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      },
+      {
+        "name": "Gmail - SilvaK2620",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "silvak2620@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      },
+      {
+        "name": "Gmail - SilvaKRetail",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "silvakretail@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      },
+      {
+        "name": "Gmail - ShivaKand115",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "shivakand115@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      },
+      {
+        "name": "Gmail - SiyanThank",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "siyanthank@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      },
+      {
+        "name": "Gmail - Account 6",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "GMAIL_6@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      },
+      {
+        "name": "Gmail - Account 7",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "GMAIL_7@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      },
+      {
+        "name": "Gmail - Account 8",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "GMAIL_8@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      },
+      {
+        "name": "Gmail - Account 9",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "GMAIL_9@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      },
+      {
+        "name": "Gmail - Account 10",
+        "protocol": "imap-smtp",
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "smtpHost": "smtp.gmail.com",
+        "smtpPort": 587,
+        "email": "GMAIL_10@gmail.com",
+        "password": "APP_PASSWORD_16_DIGIT",
+        "pollInterval": 120000
+      }
+    ],
+    "microsoft": [
+      {
+        "name": "Outlook - SilvaK Retail (MAIN)",
+        "protocol": "imap-smtp",
+        "imapHost": "imap-mail.outlook.com",
+        "imapPort": 993,
+        "smtpHost": "smtp-mail.outlook.com",
+        "smtpPort": 587,
+        "pollInterval": 120000,
+        "email": "silvakretail@outlook.com",
+        "password": "APP_PASSWORD_OR_PASSWORD"
+      },
+      {
+        "name": "Outlook - SilvaK2023",
+        "protocol": "imap-smtp",
+        "imapHost": "imap-mail.outlook.com",
+        "imapPort": 993,
+        "smtpHost": "smtp-mail.outlook.com",
+        "smtpPort": 587,
+        "pollInterval": 120000,
+        "email": "silvak2023@outlook.com",
+        "password": "APP_PASSWORD_OR_PASSWORD"
+      },
+      {
+        "name": "Hotmail - YourShop1",
+        "protocol": "imap-smtp",
+        "imapHost": "imap-mail.outlook.com",
+        "imapPort": 993,
+        "smtpHost": "smtp-mail.outlook.com",
+        "smtpPort": 587,
+        "pollInterval": 120000,
+        "email": "yourshop1@hotmail.com",
+        "password": "APP_PASSWORD_OR_PASSWORD"
+      },
+      {
+        "name": "Live - SVA23",
+        "protocol": "imap-smtp",
+        "imapHost": "imap-mail.outlook.com",
+        "imapPort": 993,
+        "smtpHost": "smtp-mail.outlook.com",
+        "smtpPort": 587,
+        "pollInterval": 120000,
+        "email": "sva23@live.co.uk",
+        "password": "APP_PASSWORD_OR_PASSWORD"
+      },
+      {
+        "name": "Microsoft - Account 5",
+        "protocol": "imap-smtp",
+        "imapHost": "imap-mail.outlook.com",
+        "imapPort": 993,
+        "smtpHost": "smtp-mail.outlook.com",
+        "smtpPort": 587,
+        "pollInterval": 120000,
+        "email": "MICROSOFT_5@outlook.com",
+        "password": "APP_PASSWORD_OR_PASSWORD"
+      }
+    ]
+  }
+}

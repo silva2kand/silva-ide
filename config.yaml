@@ -1,0 +1,41 @@
+model_list:
+  - model_name: claude-3-5-haiku
+    litellm_params:
+      model: openai/Meta-Llama-3_1-8B-Instruct-IQ4_XS
+      api_base: http://localhost:1337/v1
+      api_key: jan-local
+      rpm: 100
+      fallbacks: 
+        - model: openai/llama3.2
+          api_base: http://localhost:11434/v1
+          
+  - model_name: claude-3-5-sonnet
+    litellm_params:
+      model: openai/Qwen3_5-9B-Claude-4.6-Opus-Reasoning-Distilled
+      api_base: http://localhost:1337/v1
+      api_key: jan-local
+      rpm: 100
+      fallbacks:
+        - model: openai/qwen2.5-coder:14b
+          api_base: http://localhost:11434/v1
+
+  - model_name: claude-3-opus
+    litellm_params:
+      model: openai/Qwen3_5-9B-Abliterated-GGUF
+      api_base: http://localhost:1337/v1
+      api_key: jan-local
+      rpm: 100
+      fallbacks:
+        - model: openai/llama3.2
+          api_base: http://localhost:11434/v1
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  request_timeout: 120
+  max_parallel_requests: 100
+
+general_settings:
+  master_key: sk-claude-local
+  database_url: "sqlite:///./litellm.db"
+  proxy_log_level: "INFO"

@@ -1,0 +1,6 @@
+{
+  "name": "silva-system-operator",
+  "version": "0.1.0",
+  "description": "Semi-autonomous full-machine operator mode for research, dealflow, and approvals.",
+  "author": "Silva"
+}

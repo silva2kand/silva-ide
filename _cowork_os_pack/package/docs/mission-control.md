@@ -1,0 +1,263 @@
+# Mission Control
+
+Mission Control is a centralized agent orchestration and monitoring dashboard. It provides a command center for managing agents, tracking tasks across a Kanban board, monitoring real-time activity, and overseeing team-based collaboration.
+
+Heartbeat v3 is the default background automation model exposed here. Mission Control should be read as pulse/defer/dispatch truth, not as a wake-queue monitor. See [Heartbeat v3](heartbeat-v3.md) for the runtime model.
+
+Access it from **Settings** > **Mission Control**. For company-ops workflows, you can also jump into it directly from **Settings** > **Companies** with the selected company preloaded.
+
+Mission Control now sits alongside two other operational entry points:
+
+- **Devices** for machine-level task routing and remote execution
+- **Settings > Automations** for queueing, scheduling, triggers, briefing, and self-improvement policies
+- **Settings > Companies** for company graph editing and operator assignment
+
+## Layout
+
+Mission Control is split into three panels:
+
+| Panel | Purpose |
+|-------|---------|
+| **Left — Agents** | Active agents list with Pulse/Dispatch state, cadence, and manual trigger controls |
+| **Center — Mission Queue** | Kanban board with 5 columns for task lifecycle management |
+| **Right — Feed & Details** | Live activity feed and selected task details with comments/mentions |
+
+The header bar shows workspace selector, key stats (active agents, queued tasks, pending mentions), current time, and buttons for Teams, Reviews, and Standup.
+
+---
+
+## Agents Panel (Left)
+
+View and manage all active agents in the current workspace.
+
+### Agent Information
+
+Each agent card shows:
+- Display name, role description, and avatar
+- Current active task title (or "No active task")
+- **Autonomy level badge**: LEAD, SPC (Specialist), or INT (Intern)
+- **Heartbeat profile**: `observer`, `operator`, or `dispatcher`
+- **Status indicator**: green dot (working), gray dot (idle), disabled (offline)
+- Next scheduled Pulse time
+- Latest Pulse result and latest Dispatch result
+- Deferred, cooldown, and dispatch-budget state when relevant
+
+### Agent Actions
+
+| Action | Result |
+|--------|--------|
+| **Click** agent | Select/deselect — filters the activity feed to that agent |
+| **Double-click** agent | Open Agent Role Editor to edit configuration |
+| **Trigger Pulse** button | Manually trigger Heartbeat v3 review immediately |
+| **"Add Agent"** button | Create a new agent role with configuration modal |
+
+### Agent Role Editor
+
+Configure agent roles with:
+- Display name, description, icon, and color
+- Personality and model preferences
+- Capabilities and tool restrictions
+- Autonomy level (lead / specialist / intern)
+- Heartbeat v3 settings (`heartbeatEnabled`, `pulseEveryMinutes`, `dispatchCooldownMinutes`, `maxDispatchesPerDay`, `activeHours`, `heartbeatProfile`, plus stagger support for Pulse cadence)
+
+---
+
+## Mission Queue — Kanban Board (Center)
+
+A 5-column Kanban board for managing the full task lifecycle. Drag tasks between columns to change their status.
+
+| Column | Status | Description |
+|--------|--------|-------------|
+| **INBOX** | Backlog | Unassigned items waiting for triage |
+| **ASSIGNED** | Todo | Queued and assigned to agents |
+| **IN PROGRESS** | Active | Currently being executed |
+| **REVIEW** | Pending review | Awaiting approval or human review |
+| **DONE** | Completed | Finished tasks |
+
+### Task Cards
+
+Each card shows:
+- Task title
+- Assigned agent (avatar + name)
+- Status pill with color coding
+- Time since last update (relative: "5m ago", "2h ago")
+
+### Interactions
+
+- **Drag and drop** tasks between columns to change status
+- **Click** a task card to view its details in the right panel
+
+---
+
+## Feed & Task Details (Right)
+
+Tabbed panel with three views.
+
+### Live Feed Tab
+
+Real-time activity stream for the current workspace.
+
+**Filter by event type:**
+- ALL — Everything
+- TASKS — Task creation and status changes
+- COMMENTS — Comments and mentions
+- STATUS — Heartbeat status updates
+
+**Filter by agent:** Click agent chips to show only that agent's activity.
+
+**Event types shown:**
+- Pulse results (`idle`, `deferred`, `suggestion`, `dispatch_task`, `dispatch_runbook`, `handoff_to_cron`)
+- Dispatch results (`silent`, `suggestion`, `task`, `runbook`, `cron_handoff`)
+- Task comments and mentions
+- Task status changes
+- Agent assignments
+
+### Task Details Tab
+
+Click any task card to see its full details:
+
+- **Title and status** with color-coded pill
+- **Assignment controls**: Change assignee (agent dropdown) and stage (column dropdown)
+- **Task brief**: Full prompt/description
+- **Updates**: Activity feed for this task with comment box to post updates
+- **Mentions**: Create and manage mentions with status tracking (pending, acknowledged, completed, dismissed)
+
+### Ops Tab
+
+The `Ops` tab is the company-operations view used by the zero-human-company workflow.
+
+It exposes:
+
+- company snapshot
+- goals and projects
+- planner-managed issues
+- planner-cycle issue drill-down
+- issue comments
+- issue execution runs
+- run timeline events
+- linked task navigation
+
+Use it together with the strategic planner strip to watch company-level planning move into executable task work.
+
+The `Ops` tab is most useful when the company graph is maintained in **Settings** > **Companies**, since that tab is where companies, goals, projects, issues, and linked operators are created and edited.
+
+If the work itself is being executed on another machine, pair Mission Control with the **Devices** tab: Mission Control gives you company-level orchestration, while Devices gives you machine-level routing and remote task inspection.
+
+---
+
+## Strategic Planner Strip
+
+Mission Control now includes a planner strip above the three-panel layout for company-ops configuration and review.
+
+Available controls:
+
+- company selector
+- planner enabled/disabled toggle
+- auto-dispatch toggle
+- planner interval
+- planning workspace selector
+- planner-agent selector
+- approval preset selector
+- manual `Run Planner`
+- recent planner cycle history
+
+This is the main desktop entry point for zero-human-company planning loops.
+
+Companies created in **Settings** > **Companies** appear here in the company selector. If you opened Mission Control from a company page, that company is preselected.
+
+---
+
+## Agent Teams
+
+Access from the **Teams** button in the header. Full management UI for coordinated multi-agent collaboration.
+
+- **Create teams**: Name, description, lead agent, max parallel agents, model and personality preferences
+- **Manage members**: Add/remove agents, reorder, provide guidance
+- **Create team runs**: Execute coordinated multi-agent tasks
+- **Track items**: Shared checklists within a run with status tracking
+- **Real-time events**: Live tracking of team activity (member changes, run status, item updates)
+
+See [Features — Agent Teams](features.md#agent-teams) for more details.
+
+---
+
+## Digital Twin Personas
+
+Access from the **Add Digital Twin** button in the agents panel (next to Add Agent).
+
+Browse pre-built persona templates — Software Engineer, Engineering Manager, Product Manager, and more — and activate them in one click. Each twin comes pre-configured with:
+
+- **Heartbeat v3 proactive tasks** evaluated in Pulse and escalated only when justified
+- **Cognitive offload categories** targeting the mental work that fragments focus
+- **Recommended skills** for on-demand use (meeting prep, decision packages, status reports)
+
+Mission Control is also the best place to monitor venture/operator twins such as:
+
+- `Founder Office Operator`
+- `Company Planner`
+- `Growth Operator`
+- `Customer Ops Lead`
+
+If those twins were created from a company context, they still appear in Mission Control as normal agents, but they retain their company assignment for use in `Ops`, `Companies`, and company-aware Digital Twins views.
+
+See [Digital Twins](digital-twins.md) for full documentation, enterprise scenarios, and template reference.
+
+---
+
+## Performance Reviews
+
+Access from the **Reviews** button in the header.
+
+- **Select agent** and review period (1-90 days, default 7)
+- **Generate review**: Analyzes task completion rate, error rates, and autonomy effectiveness
+- **View history**: Browse previous reviews per agent
+- **Apply recommendation**: Auto-update an agent's autonomy level based on the review
+
+---
+
+## Standup Reports
+
+Access from the **Standup** button in the header.
+
+- **Generate standup**: Auto-generate a summary of recent workspace activity
+- **View reports**: Browse up to 30 recent standup reports
+- **Metrics included**: Completed tasks, in-progress tasks, blocked tasks with titles and statuses
+
+---
+
+## Real-Time Updates
+
+Mission Control subscribes to live event streams — no manual refresh needed:
+
+| Event Stream | What It Updates |
+|-------------|-----------------|
+| **Heartbeat v3 events** | Agent status dots, pulse/dispatch indicators, deferred state, feed items |
+| **Activity events** | Comments, mentions, assignments in the feed |
+| **Task events** | New tasks, status changes on the Kanban board |
+| **Task board events** | Column moves, priority changes, label/date updates |
+| **Team run events** | Team and member changes, run progress, item status |
+| **Mention events** | Pending mention count in header, mention list in task details |
+
+---
+
+## Quick Reference
+
+| Action | How |
+|--------|-----|
+| Open Mission Control | Settings > Mission Control |
+| Open company-scoped Mission Control | Settings > Companies > Open in Mission Control |
+| Add a new agent | Click "Add Agent" in the agents panel |
+| Add a digital twin | Click "Add Digital Twin" in the agents panel ([details](digital-twins.md)) |
+| Configure the company planner | Use the planner strip above the board |
+| Inspect company ops | Open the `Ops` tab in the right panel |
+| Edit an agent | Double-click the agent card |
+| Trigger immediate heartbeat review | Click `Trigger Pulse` on the agent card |
+| Move a task to a new stage | Drag the task card to the target column |
+| View task details | Click any task card |
+| Post an update on a task | Select task, type in the comment box, click "Post Update" |
+| Filter feed by agent | Click an agent chip in the feed panel |
+| Create a team | Header > Teams > create team |
+| Generate a performance review | Header > Reviews > select agent > Generate |
+| Generate a standup report | Header > Standup > Generate Standup Report |
+
+For a full founder-directed autonomous-company setup, see [Zero-Human Company Operations](zero-human-company.md).

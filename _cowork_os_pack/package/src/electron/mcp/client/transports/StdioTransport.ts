@@ -1,0 +1,390 @@
+/**
+ * StdioTransport - MCP transport over stdio (stdin/stdout)
+ *
+ * This is the primary transport for MCP servers that are launched as
+ * child processes and communicate via JSON-RPC over stdin/stdout.
+ */
+
+import { spawn, ChildProcess } from "child_process";
+import { EventEmitter } from "events";
+import {
+  MCPTransport,
+  MCPServerConfig,
+  JSONRPCRequest,
+  JSONRPCResponse,
+  JSONRPCNotification,
+} from "../../types";
+import { createLogger } from "../../../utils/logger";
+
+interface PendingRequest {
+  resolve: (result: unknown) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+const logger = createLogger("MCP StdioTransport");
+
+export class StdioTransport extends EventEmitter implements MCPTransport {
+  private process: ChildProcess | null = null;
+  private config: MCPServerConfig;
+  private messageHandler: ((message: JSONRPCResponse | JSONRPCNotification) => void) | null = null;
+  private closeHandler: ((error?: Error) => void) | null = null;
+  private errorHandler: ((error: Error) => void) | null = null;
+  private pendingRequests: Map<string | number, PendingRequest> = new Map();
+  private buffer = "";
+  private stderrBuffer = ""; // Capture stderr for better error messages
+  private connected = false;
+  private requestId = 0;
+
+  constructor(config: MCPServerConfig) {
+    super();
+    this.config = config;
+  }
+
+  /**
+   * Connect to the MCP server by spawning the process
+   */
+  async connect(): Promise<void> {
+    if (this.connected || this.process) {
+      throw new Error("Already connected");
+    }
+
+    const { command, args = [], env, cwd } = this.config;
+
+    if (!command) {
+      throw new Error("No command specified for stdio transport");
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.cleanup();
+        reject(
+          new Error(
+            `Connection timeout: server did not respond within ${this.config.connectionTimeout || 30000}ms`,
+          ),
+        );
+      }, this.config.connectionTimeout || 30000);
+
+      try {
+        // Merge environment variables
+        const processEnv = {
+          ...process.env,
+          ...env,
+        };
+
+        // Substitute ${VAR} in args with env values (for connectors that require CLI args)
+        const resolvedArgs = args.map((arg) => {
+          if (typeof arg === "string" && /^\$\{[^}]+\}$/.test(arg)) {
+            const varName = arg.slice(2, -1);
+            return processEnv[varName] ?? arg;
+          }
+          return arg;
+        });
+
+        // When launching via Electron's executable with --runAsNode, force pure
+        // Node mode so macOS doesn't treat child connector processes as GUI apps.
+        if (command === process.execPath && resolvedArgs.includes("--runAsNode")) {
+          processEnv.ELECTRON_RUN_AS_NODE = "1";
+        }
+
+        logger.debug(`Spawning: ${command} ${resolvedArgs.join(" ")}`);
+
+        this.process = spawn(command, resolvedArgs, {
+          cwd: cwd || process.cwd(),
+          env: processEnv,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+
+        // Handle stdout (JSON-RPC messages from server)
+        this.process.stdout?.on("data", (data: Buffer) => {
+          this.handleData(data);
+        });
+
+        // Handle stderr (logging/errors from server)
+        this.process.stderr?.on("data", (data: Buffer) => {
+          const text = data.toString();
+          logger.debug(`Server stderr: ${text}`);
+          // Capture stderr for better error messages (limit to last 1000 chars)
+          this.stderrBuffer += text;
+          if (this.stderrBuffer.length > 1000) {
+            this.stderrBuffer = this.stderrBuffer.slice(-1000);
+          }
+        });
+
+        // Handle process errors
+        this.process.on("error", (error) => {
+          clearTimeout(timeout);
+          logger.error("Process error:", error);
+          this.errorHandler?.(error);
+          if (!this.connected) {
+            reject(error);
+          }
+          this.cleanup();
+        });
+
+        // Handle process exit
+        this.process.on("exit", (code, signal) => {
+          clearTimeout(timeout);
+          // Build error message including stderr output for better diagnostics
+          let message = `Process exited with code ${code}`;
+          if (signal) {
+            message += `, signal ${signal}`;
+          }
+          // Include stderr in error message if there was an error exit
+          if (code !== 0 && this.stderrBuffer.trim()) {
+            const stderrSnippet = this.stderrBuffer.trim().slice(-500); // Last 500 chars
+            message += `: ${stderrSnippet}`;
+          }
+          if (code === 0) {
+            logger.debug(message);
+          } else {
+            logger.warn(message);
+          }
+
+          if (!this.connected) {
+            reject(new Error(message));
+          } else {
+            this.closeHandler?.(code !== 0 ? new Error(message) : undefined);
+          }
+          this.cleanup();
+        });
+
+        // Handle process close
+        this.process.on("close", (code) => {
+          if (this.connected) {
+            let message = `Process closed with code ${code}`;
+            if (code !== 0 && this.stderrBuffer.trim()) {
+              const stderrSnippet = this.stderrBuffer.trim().slice(-500);
+              message += `: ${stderrSnippet}`;
+            }
+            this.closeHandler?.(code !== 0 ? new Error(message) : undefined);
+          }
+          this.cleanup();
+        });
+
+        // Mark as connected once process is spawned
+        // The actual MCP handshake will be done by MCPServerConnection
+        this.connected = true;
+        clearTimeout(timeout);
+        logger.debug("Process spawned successfully");
+        resolve();
+      } catch (error) {
+        clearTimeout(timeout);
+        logger.error("Failed to spawn process:", error);
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Disconnect from the MCP server
+   */
+  async disconnect(): Promise<void> {
+    if (!this.process) {
+      return;
+    }
+
+    logger.debug("Disconnecting...");
+
+    // Reject all pending requests
+    for (const [_id, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("Transport disconnected"));
+    }
+    this.pendingRequests.clear();
+
+    // Try graceful shutdown first
+    if (this.process.stdin?.writable) {
+      try {
+        this.process.stdin.end();
+      } catch {
+        // Ignore errors during shutdown
+      }
+    }
+
+    // Give process time to exit gracefully
+    await new Promise<void>((resolve) => {
+      const forceKillTimeout = setTimeout(() => {
+        if (this.process && !this.process.killed) {
+          logger.warn("Force killing process");
+          this.process.kill("SIGKILL");
+        }
+        resolve();
+      }, 5000);
+
+      if (this.process) {
+        this.process.once("exit", () => {
+          clearTimeout(forceKillTimeout);
+          resolve();
+        });
+
+        // Send SIGTERM first
+        this.process.kill("SIGTERM");
+      } else {
+        clearTimeout(forceKillTimeout);
+        resolve();
+      }
+    });
+
+    this.cleanup();
+  }
+
+  /**
+   * Send a JSON-RPC request and wait for response
+   */
+  async sendRequest(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    if (!this.connected || !this.process?.stdin?.writable) {
+      throw new Error("Not connected");
+    }
+
+    const id = ++this.requestId;
+    const request: JSONRPCRequest = {
+      jsonrpc: "2.0",
+      id,
+      method,
+      params,
+    };
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`Request timeout for method: ${method}`));
+      }, this.config.requestTimeout || 60000);
+
+      this.pendingRequests.set(id, { resolve, reject, timeout });
+
+      try {
+        const message = JSON.stringify(request) + "\n";
+        this.process!.stdin!.write(message);
+      } catch (error) {
+        this.pendingRequests.delete(id);
+        clearTimeout(timeout);
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Send a JSON-RPC message (request or notification)
+   */
+  async send(message: JSONRPCRequest | JSONRPCNotification): Promise<void> {
+    if (!this.connected || !this.process?.stdin?.writable) {
+      throw new Error("Not connected");
+    }
+
+    try {
+      const data = JSON.stringify(message) + "\n";
+      this.process.stdin.write(data);
+    } catch (error) {
+      throw new Error(`Failed to send message: ${error}`);
+    }
+  }
+
+  /**
+   * Register message handler
+   */
+  onMessage(handler: (message: JSONRPCResponse | JSONRPCNotification) => void): void {
+    this.messageHandler = handler;
+  }
+
+  /**
+   * Register close handler
+   */
+  onClose(handler: (error?: Error) => void): void {
+    this.closeHandler = handler;
+  }
+
+  /**
+   * Register error handler
+   */
+  onError(handler: (error: Error) => void): void {
+    this.errorHandler = handler;
+  }
+
+  /**
+   * Check if transport is connected
+   */
+  isConnected(): boolean {
+    return this.connected && !!this.process && !this.process.killed;
+  }
+
+  /**
+   * Handle incoming data from stdout
+   */
+  private handleData(data: Buffer): void {
+    this.buffer += data.toString();
+
+    // Process complete lines (JSON-RPC messages are newline-delimited)
+    let newlineIndex: number;
+    while ((newlineIndex = this.buffer.indexOf("\n")) !== -1) {
+      const line = this.buffer.slice(0, newlineIndex).trim();
+      this.buffer = this.buffer.slice(newlineIndex + 1);
+
+      if (line) {
+        try {
+          const message = JSON.parse(line);
+          this.handleMessage(message);
+        } catch  {
+          logger.warn(`Failed to parse message: ${line}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle a parsed JSON-RPC message
+   */
+  private handleMessage(message: unknown): void {
+    if (!message || typeof message !== "object") {
+      return;
+    }
+
+    const msg = message as Record<string, unknown>;
+
+    // Check if this is a response to a pending request
+    const id = msg.id;
+    if ((typeof id === "string" || typeof id === "number") && id !== null) {
+      const pending = this.pendingRequests.get(id);
+      if (pending) {
+        this.pendingRequests.delete(id);
+        clearTimeout(pending.timeout);
+
+        const err = msg.error;
+        if (err && typeof err === "object") {
+          const errMessage = (err as Record<string, unknown>).message;
+          pending.reject(
+            new Error(typeof errMessage === "string" && errMessage ? errMessage : "Unknown error"),
+          );
+        } else {
+          pending.resolve(msg.result);
+        }
+        return;
+      }
+    }
+
+    // Otherwise, pass to message handler (notifications)
+    this.messageHandler?.(msg as unknown as JSONRPCResponse | JSONRPCNotification);
+  }
+
+  /**
+   * Cleanup resources
+   */
+  private cleanup(): void {
+    this.connected = false;
+    this.buffer = "";
+    this.stderrBuffer = "";
+
+    // Reject all pending requests so callers don't hang forever
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("Transport closed"));
+    }
+    this.pendingRequests.clear();
+
+    if (this.process) {
+      this.process.removeAllListeners();
+      this.process.stdout?.removeAllListeners();
+      this.process.stderr?.removeAllListeners();
+      this.process = null;
+    }
+  }
+}

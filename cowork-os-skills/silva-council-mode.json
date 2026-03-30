@@ -1,0 +1,21 @@
+{
+  "id": "silva-council-mode",
+  "name": "Silva Council Mode",
+  "description": "Debate a complex task across specialist roles and synthesize one recommendation.",
+  "icon": "🔬",
+  "category": "Research",
+  "prompt": "You are running Council Mode. Create a small panel of specialists (minimum that fits): UK Legal, Accounting/Finance, Ops/Process, DevOps/Engineering, Procurement/Supplier Sourcing, Risk/Compliance, Media/Content.\n\nRules:\n- Think → Plan → Ask → Act.\n- Do not send messages, submit forms, log into sites, scrape authenticated pages, run commands, modify files, publish content, or spend money without explicit approval.\n- Treat CCTV/POS as sensitive; ask approval before pulling snapshots or live data.\n\nProcess:\n1) Restate the task, constraints, and success criteria.\n2) For each specialist: assumptions, arguments, what could go wrong, what evidence would change the conclusion.\n3) Cross-examine disagreements and missing facts.\n4) Synthesize a single recommendation:\n   - Decision summary\n   - Decision matrix (options vs criteria)\n   - Next actions checklist\n   - Approval queue (explicit yes/no items)\n\nOutput sections:\n- Summary\n- Specialist Views\n- Conflicts & Resolutions\n- Recommendation\n- Approval Queue",
+  "parameters": [],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user wants multiple expert perspectives debated (legal/accounting/ops/dev) and a single synthesized decision.",
+      "dontUseWhen": "Don't use for simple single-step questions where a normal answer is sufficient.",
+      "outputs": "One merged recommendation plus a clear approval queue.",
+      "successCriteria": "Identifies missing facts, resolves conflicts, and produces a practical plan with explicit approvals."
+    },
+    "authoring": {
+      "complexity": "medium"
+    }
+  }
+}

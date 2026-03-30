@@ -1,0 +1,105 @@
+# CoWork OS — Product Positioning & GTM Strategy
+
+> Status: Active draft, aligned to current product docs.
+
+## Category Definition
+
+CoWork OS is a **security-hardened, local-first AI operating system**.
+
+- OpenClaw is best positioned as an agent experimentation toolkit.
+- CoWork OS is positioned as the production runtime for running agents safely across real workflows.
+
+## Primary Positioning Statement
+
+CoWork OS is the production alternative to OpenClaw for users who need:
+
+- Guardrails and approval workflows by default
+- Local-first data ownership (BYOK, no telemetry)
+- A multi-channel operating layer (15 messaging channels)
+- A desktop + headless runtime that can be governed in daily operations
+
+Short form:
+
+> OpenClaw is excellent for experimentation. CoWork OS is optimized for governed daily operations.
+
+## Core Buyer Profiles
+
+1. Technical founders running customer-facing or ops-heavy automation.
+2. Security-conscious builders who need local control over data and keys.
+3. Team leads who want agent output in existing messaging channels with approval gates.
+4. Power users who want agent autonomy without cloud lock-in.
+
+## Differentiation Pillars
+
+### 1) Playground to Production
+
+CoWork OS prioritizes execution discipline over experimentation novelty:
+approval workflows, guardrail budgets, policy enforcement, and sandboxed execution.
+
+### 2) Security-First by Design
+
+CoWork OS ships with core controls required for practical use:
+dangerous command blocking, configurable limits, encrypted local settings, and context-aware tool controls.
+
+### 3) Multi-Channel AI Operating Layer
+
+CoWork OS is not just a local runner. It is a messaging-native runtime across 15 channels with shared security modes and governance.
+
+### 4) Local-First + BYOK
+
+Users keep control of data and provider keys with optional offline model execution via Ollama.
+
+## Proof Points to Reuse in Messaging
+
+- 30+ LLM providers
+- 15 messaging channels
+- 100+ built-in skills
+- 4000+ tests
+- ZeroLeaks report published in-repo
+
+## Narrative Guardrails
+
+Do:
+
+- Contrast category focus (toolkit vs operating system).
+- Emphasize production readiness and security controls.
+- Stay factual and neutral in competitor references.
+- Explicitly respect OpenClaw and its community.
+
+Do not:
+
+- Frame as "more features than OpenClaw" only.
+- Rely on speculative competitor claims.
+- Use adversarial language.
+
+## SEO Guidance
+
+Use these phrases naturally in docs and landing sections:
+
+- OpenClaw alternative
+- alternative to OpenClaw
+- OpenClaw vs CoWork OS
+
+Keep SEO copy factual and fit-based. Avoid negative or inflammatory wording.
+
+## Best Initial Wedges
+
+> This section describes GTM entry points within the existing category — not a repositioning. CoWork OS remains a security-hardened, local-first AI operating system.
+
+The three operational lanes where CoWork OS has the clearest initial ROI are governed, intelligence-heavy workflows that benefit most from approval gates, local data control, and measurable outcome delivery:
+
+| Lane | Pack | Primary Connectors | Why It Wins Early |
+|------|------|--------------------|-------------------|
+| **Support Ops** | Customer Support Pack | Zendesk, ServiceNow | High-volume, well-defined quality criteria; completion rate and response time are measurable on day one |
+| **IT Ops** | DevOps Pack | ServiceNow, Jira, Linear | Incident and release workflows have clear triggers, audit requirements, and high cost of error |
+| **Sales Ops** | Sales CRM Pack | HubSpot, Salesforce | Outbound workflows are repetitive but require personalization — the balance where governed AI delivery performs best |
+
+These are best-fit entry points, not exclusions. CoWork OS works across many workflows; these three have the most predictable buyer, measurable outcome, and vendor-swap-friendly structure.
+
+For the full workflow narrative, see [Best-Fit Operational Workflows](best-fit-workflows.md).
+
+## GTM Assets in This Repo
+
+- [OpenClaw Alternative Guide](openclaw-comparison.md)
+- [Migration Guide](migration.md#from-openclaw-to-cowork-os)
+- [Competitive Landscape Research](competitive-landscape-research.md)
