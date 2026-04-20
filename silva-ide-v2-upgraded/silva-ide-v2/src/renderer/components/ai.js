@@ -176,6 +176,66 @@ window.AIManager = (() => {
     }
   }
 
+  async function exportActionsLogMarkdownToFile() {
+    try {
+      if (!window.silva?.fs?.saveDialog || !window.silva?.fs?.writeFile) { window.notify?.('Save unavailable', 'warning'); return; }
+      const res = await window.silva.fs.saveDialog({
+        title: 'Export actions log (markdown)',
+        defaultPath: 'silva-actions-log.md',
+        filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'All Files', extensions: ['*'] }],
+      });
+      if (!res?.success || !res.filePath) return;
+      const meta = getActionsExportObject()?.meta || {};
+      const lines = [];
+      lines.push(`# Silva Actions Log`);
+      lines.push('');
+      lines.push(`- exportedAt: ${meta.exportedAt || ''}`);
+      lines.push(`- projectRoot: ${meta.projectRoot || ''}`);
+      lines.push(`- activeMode: ${String(meta.activeMode || '')}`);
+      lines.push(`- perfMode: ${String(meta.perfMode || '')}`);
+      lines.push(`- autoExecute: ${String(meta.autoExecute)}`);
+      lines.push(`- approvalsPending: ${String(meta.approvalsPending || 0)}`);
+      lines.push(`- provider1: ${(meta.providers?.p1?.providerId || '')} ${(meta.providers?.p1?.model || '')}`.trim());
+      lines.push(`- provider2: ${(meta.providers?.p2?.providerId || '')} ${(meta.providers?.p2?.model || '')}`.trim());
+      lines.push('');
+      lines.push('| time | ok | kind | target | detail |');
+      lines.push('|---|---:|---|---|---|');
+      for (const x of actionLog.slice(0, 80)) {
+        const t = new Date(x.at).toLocaleTimeString();
+        const ok = x.ok ? 'OK' : 'FAIL';
+        const kind = String(x.kind || '');
+        const target = String(x.target || '').replace(/\|/g, '\\|');
+        const detail = String(x.detail || '').replace(/\|/g, '\\|');
+        lines.push(`| ${t} | ${ok} | ${kind} | ${target} | ${detail} |`);
+      }
+      const payload = lines.join('\n');
+      const gate = await enforceGateAction('CODE_WRITE', { path: String(res.filePath), bytes: payload.length, source: 'ai.actions.exportMarkdown' });
+      if (!gate.allowed) { window.notify?.(gate.error || 'Blocked by policy', 'warning'); return; }
+      const w = await window.silva.fs.writeFile(res.filePath, payload);
+      if (!w?.success) { window.notify?.(w?.error || 'Save failed', 'error'); return; }
+      window.notify?.('Actions log saved (markdown)', 'success');
+    } catch (e) {
+      window.notify?.(`Save failed: ${e?.message || e}`, 'error');
+    }
+  }
+
+  async function dryRunPatchFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      const patch = String(text || '').trim();
+      if (!patch) { window.notify?.('Clipboard is empty', 'warning'); return; }
+      if (!/^\*\*\*\s*Begin Patch\b/m.test(patch)) { window.notify?.('Clipboard does not look like a patch', 'warning'); return; }
+      const r = await toolProtocol.apply_patch({ patch, dryRun: true });
+      const results = Array.isArray(r?.results) ? r.results : [];
+      const ok = !!r?.success;
+      const summary = `${ok ? 'Dry-run OK' : 'Dry-run FAIL'} (${results.filter(x => x.ok).length}/${results.length})`;
+      const detail = results.map(x => `${x.ok ? 'OK' : 'FAIL'} ${x.type} ${x.file}${x.error ? ` - ${x.error}` : ''}`).join('\n');
+      window.silva?.dialog?.showMessage?.({ title: 'Dry-run patch (clipboard)', message: summary, detail });
+    } catch (e) {
+      window.notify?.(`Dry-run failed: ${e?.message || e}`, 'error');
+    }
+  }
+
   function getActionsExportObject() {
     const root = window.FileTreeManager?.getRootPath?.() || '';
     const p1ProviderId = document.getElementById('p1-provider')?.value || provider1?.id || '';
@@ -253,6 +313,8 @@ window.AIManager = (() => {
       const color = x.ok ? 'var(--green)' : 'var(--red)';
       const target = esc(x.target || '(none)');
       const detail = x.detail ? ` · ${esc(x.detail)}` : '';
+      const payloadLen = x.payload ? String(x.payload).length : 0;
+      const payloadNote = payloadLen ? ` · payload ${(payloadLen / 1024).toFixed(1)}KB` : '';
       const needsApproval = isApprovalNeeded(x);
       const m = String(x.detail || '').match(/gateId\\s*=\\s*([A-Za-z0-9_-]+)/i);
       const gateId = m ? m[1] : '';
@@ -268,7 +330,7 @@ window.AIManager = (() => {
         } catch {}
       }
       const openFileBtn = fileForOpen
-        ? `<button class="icon-btn log-open-file" data-at="${esc(String(x.at || ''))}" data-file="${esc(fileForOpen)}" title="Open file" style="margin-left:6px;font-size:10px;padding:1px 6px">Open File</button>`
+        ? `<button class="icon-btn log-open-file" data-at="${esc(String(x.at || ''))}" data-file="${esc(fileForOpen)}" title="Open file" style="margin-left:6px;font-size:10px;padding:1px 6px">${x.kind === 'apply_patch' ? 'Open First' : 'Open File'}</button>`
         : '';
       const copyPathBtn = (x.kind === 'write_file' || x.kind === 'apply_patch') && (x.target || x.payload)
         ? `<button class="icon-btn log-copy-path" data-file="${esc(String(fileForOpen || x.target || ''))}" title="Copy file path" style="margin-left:6px;font-size:10px;padding:1px 6px">Copy Path</button>`
@@ -306,7 +368,7 @@ window.AIManager = (() => {
         <span style="color:${color};font-weight:700;margin-left:6px">${status}</span>
         <span style="margin-left:6px">${esc(x.kind)}:</span>
         <span style="margin-left:4px">${target}</span>
-        <span style="color:var(--overlay0)">${detail}</span>
+        <span style="color:var(--overlay0)">${detail}${payloadNote}</span>
         ${gateBtn}
         ${openFileBtn}
         ${copyPathBtn}
@@ -1573,6 +1635,8 @@ window.AIManager = (() => {
     <button id="btn-export-actions" class="icon-btn" title="Copy actions log as JSON">⧉</button>
     <button id="btn-export-actions-file" class="icon-btn" title="Save actions log to file">💾</button>
     <button id="btn-export-actions-md" class="icon-btn" title="Copy actions log as markdown">MD</button>
+    <button id="btn-export-actions-md-file" class="icon-btn" title="Save actions log as markdown">📝</button>
+    <button id="btn-dryrun-clipboard" class="icon-btn" title="Dry-run patch from clipboard">DRY</button>
     <button id="btn-retry-actions" class="icon-btn" title="Retry failed commands">↻</button>
     <button id="btn-clear-actions" class="icon-btn" title="Clear actions log">✕</button>
   </div>
@@ -1640,6 +1704,8 @@ window.AIManager = (() => {
     document.getElementById('btn-export-actions')?.addEventListener('click', exportActionsLog);
     document.getElementById('btn-export-actions-file')?.addEventListener('click', exportActionsLogToFile);
     document.getElementById('btn-export-actions-md')?.addEventListener('click', exportActionsLogMarkdown);
+    document.getElementById('btn-export-actions-md-file')?.addEventListener('click', exportActionsLogMarkdownToFile);
+    document.getElementById('btn-dryrun-clipboard')?.addEventListener('click', dryRunPatchFromClipboard);
     document.getElementById('ai-action-log')?.addEventListener('click', (e) => {
       const openBtn = e.target?.closest?.('.log-open-approvals');
       if (openBtn) { openApprovalsPanel(); return; }
