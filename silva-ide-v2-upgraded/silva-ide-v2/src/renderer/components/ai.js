@@ -141,8 +141,14 @@ window.AIManager = (() => {
       const gateBtn = needsApproval
         ? `<button class="icon-btn log-open-approvals" title="Open pending approvals" style="margin-left:8px;font-size:10px;padding:1px 6px">Open Approvals</button>`
         : '';
+      const openFileBtn = (x.kind === 'write_file' || x.kind === 'apply_patch') && (x.target || x.payload)
+        ? `<button class="icon-btn log-open-file" data-file="${esc(String(x.target || x.payload || ''))}" title="Open file" style="margin-left:6px;font-size:10px;padding:1px 6px">Open File</button>`
+        : '';
       const retryBtn = (!x.ok && x.kind === 'run_command' && (x.payload || x.target))
         ? `<button class="icon-btn log-retry-cmd" data-cmd="${esc(String(x.payload || x.target || ''))}" title="Retry this command" style="margin-left:6px;font-size:10px;padding:1px 6px">Retry</button>`
+        : '';
+      const copyCmdBtn = (x.kind === 'run_command' || x.kind === 'retry_command') && (x.payload || x.target)
+        ? `<button class="icon-btn log-copy-cmd" data-cmd="${esc(String(x.payload || x.target || ''))}" title="Copy command" style="margin-left:6px;font-size:10px;padding:1px 6px">Copy</button>`
         : '';
       const copyGateBtn = (needsApproval && gateId)
         ? `<button class="icon-btn log-copy-gate" data-gate="${esc(gateId)}" title="Copy gateId" style="margin-left:6px;font-size:10px;padding:1px 6px">Copy gateId</button>`
@@ -154,7 +160,9 @@ window.AIManager = (() => {
         <span style="margin-left:4px">${target}</span>
         <span style="color:var(--overlay0)">${detail}</span>
         ${gateBtn}
+        ${openFileBtn}
         ${retryBtn}
+        ${copyCmdBtn}
         ${copyGateBtn}
       </div>`;
     });
@@ -1426,11 +1434,31 @@ window.AIManager = (() => {
     document.getElementById('ai-action-log')?.addEventListener('click', (e) => {
       const openBtn = e.target?.closest?.('.log-open-approvals');
       if (openBtn) { openApprovalsPanel(); return; }
+      const openFileBtn = e.target?.closest?.('.log-open-file');
+      if (openFileBtn) {
+        const file = String(openFileBtn.getAttribute('data-file') || '').trim();
+        const root = window.FileTreeManager?.getRootPath?.() || '';
+        const abs = root ? resolvePathWithinRoot(root, file) : null;
+        if (abs && window.EditorManager?.openFileByPath) {
+          window.EditorManager.openFileByPath(abs);
+          window.notify?.(`Opened: ${file}`, 'success');
+        } else {
+          window.notify?.('Open file failed (no project folder or invalid path).', 'warning');
+        }
+        return;
+      }
       const copyBtn = e.target?.closest?.('.log-copy-gate');
       if (copyBtn) {
         const id = String(copyBtn.getAttribute('data-gate') || '').trim();
         if (id) navigator.clipboard.writeText(id);
         window.notify?.(id ? `Copied gateId: ${id}` : 'No gateId', id ? 'success' : 'warning');
+        return;
+      }
+      const copyCmdBtn = e.target?.closest?.('.log-copy-cmd');
+      if (copyCmdBtn) {
+        const cmd = String(copyCmdBtn.getAttribute('data-cmd') || '').trim();
+        if (cmd) navigator.clipboard.writeText(cmd);
+        window.notify?.(cmd ? 'Command copied' : 'No command', cmd ? 'success' : 'warning');
         return;
       }
       const retryBtn = e.target?.closest?.('.log-retry-cmd');
