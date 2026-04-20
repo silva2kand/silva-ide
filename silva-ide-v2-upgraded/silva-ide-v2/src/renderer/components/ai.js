@@ -136,8 +136,16 @@ window.AIManager = (() => {
       const target = esc(x.target || '(none)');
       const detail = x.detail ? ` · ${esc(x.detail)}` : '';
       const needsApproval = isApprovalNeeded(x);
+      const m = String(x.detail || '').match(/gateId\\s*=\\s*([A-Za-z0-9_-]+)/i);
+      const gateId = m ? m[1] : '';
       const gateBtn = needsApproval
         ? `<button class="icon-btn log-open-approvals" title="Open pending approvals" style="margin-left:8px;font-size:10px;padding:1px 6px">Open Approvals</button>`
+        : '';
+      const retryBtn = (!x.ok && x.kind === 'run_command' && (x.payload || x.target))
+        ? `<button class="icon-btn log-retry-cmd" data-cmd="${esc(String(x.payload || x.target || ''))}" title="Retry this command" style="margin-left:6px;font-size:10px;padding:1px 6px">Retry</button>`
+        : '';
+      const copyGateBtn = (needsApproval && gateId)
+        ? `<button class="icon-btn log-copy-gate" data-gate="${esc(gateId)}" title="Copy gateId" style="margin-left:6px;font-size:10px;padding:1px 6px">Copy gateId</button>`
         : '';
       return `<div style="font-size:11px;color:var(--subtext1);padding:4px 0;border-bottom:1px dashed var(--surface1)">
         <span style="color:var(--overlay0)">[${t}]</span>
@@ -146,6 +154,8 @@ window.AIManager = (() => {
         <span style="margin-left:4px">${target}</span>
         <span style="color:var(--overlay0)">${detail}</span>
         ${gateBtn}
+        ${retryBtn}
+        ${copyGateBtn}
       </div>`;
     });
     el.innerHTML = rows.join('');
@@ -1414,9 +1424,29 @@ window.AIManager = (() => {
     document.getElementById('btn-log-filter-failed')?.addEventListener('click', () => setActionLogFilter('failed'));
     document.getElementById('btn-log-filter-approval')?.addEventListener('click', () => setActionLogFilter('approval'));
     document.getElementById('ai-action-log')?.addEventListener('click', (e) => {
-      const btn = e.target?.closest?.('.log-open-approvals');
-      if (!btn) return;
-      openApprovalsPanel();
+      const openBtn = e.target?.closest?.('.log-open-approvals');
+      if (openBtn) { openApprovalsPanel(); return; }
+      const copyBtn = e.target?.closest?.('.log-copy-gate');
+      if (copyBtn) {
+        const id = String(copyBtn.getAttribute('data-gate') || '').trim();
+        if (id) navigator.clipboard.writeText(id);
+        window.notify?.(id ? `Copied gateId: ${id}` : 'No gateId', id ? 'success' : 'warning');
+        return;
+      }
+      const retryBtn = e.target?.closest?.('.log-retry-cmd');
+      if (retryBtn) {
+        const cmd = String(retryBtn.getAttribute('data-cmd') || '').trim();
+        if (!cmd) { window.notify?.('No command to retry', 'warning'); return; }
+        toolProtocol.run_command({ command: cmd, cwd: window.FileTreeManager?.getRootPath?.() || undefined })
+          .then((r) => {
+            if (!r?.success) throw new Error(r?.error || 'Command failed');
+            logAction('retry_command', cmd, true, '', cmd);
+          })
+          .catch((err) => {
+            logAction('retry_command', cmd, false, err?.message || String(err), cmd);
+          });
+        return;
+      }
     });
     document.getElementById('btn-retry-actions')?.addEventListener('click', () => retryFailedCommands());
     document.getElementById('btn-clear-actions')?.addEventListener('click', clearActionLog);
