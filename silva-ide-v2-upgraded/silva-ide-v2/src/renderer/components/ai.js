@@ -533,6 +533,21 @@ window.AIManager = (() => {
     return { ok: true, text: fileLines.join(eol) };
   }
 
+  async function enforceGateAction(action, context = {}) {
+    if (!window.silva?.gate?.enforce) return { allowed: true };
+    try {
+      const res = await window.silva.gate.enforce(action, 'jarvice', context || {});
+      if (res?.allowed) return { allowed: true, gate: res };
+      if (res?.needsApproval) {
+        const msg = `Approval required for ${res?.action || action}. gateId=${res?.gateId || 'unknown'}`;
+        return { allowed: false, error: msg, gate: res };
+      }
+      return { allowed: false, error: res?.reason || `Blocked by gate: ${action}`, gate: res };
+    } catch (e) {
+      return { allowed: false, error: `Gate error: ${e?.message || e}`, gate: null };
+    }
+  }
+
   const toolProtocol = {
     list_files: async ({ root, depth = 2 }) => {
       const projectRoot = root || window.FileTreeManager?.getRootPath?.();
@@ -555,6 +570,8 @@ window.AIManager = (() => {
     },
     write_file: async ({ path, content }) => {
       if (!window.silva?.fs?.writeFile) return { success: false, error: 'fs.writeFile unavailable' };
+      const gate = await enforceGateAction('CODE_WRITE', { path: String(path || ''), bytes: String(content || '').length, source: 'ai.toolProtocol.write_file' });
+      if (!gate.allowed) return { success: false, error: gate.error || 'Blocked by policy' };
       const r = await window.silva.fs.writeFile(path, content);
       return { success: !!r?.success, path, error: r?.error || '' };
     },
@@ -567,6 +584,8 @@ window.AIManager = (() => {
     run_command: async ({ command, cwd }) => {
       if (!command) return { success: false, error: 'Empty command' };
       if (!window.TerminalManager) return { success: false, error: 'Terminal manager unavailable' };
+      const gate = await enforceGateAction('SHELL_EXEC', { command: String(command), cwd: String(cwd || ''), source: 'ai.toolProtocol.run_command' });
+      if (!gate.allowed) return { success: false, error: gate.error || 'Blocked by policy' };
       const finalCommand = cwd
         ? `Set-Location -LiteralPath "${String(cwd).replace(/"/g, '""')}"; ${String(command)}`
         : String(command);
@@ -608,6 +627,9 @@ window.AIManager = (() => {
 
         const parsed = parsePatchText(patch);
         if (!parsed.ok) return { success: false, error: parsed.error || 'Invalid patch' };
+        const filesList = (parsed.ops || []).map(op => op.file).filter(Boolean).slice(0, 20);
+        const gate = await enforceGateAction('CODE_WRITE', { files: filesList, opCount: (parsed.ops || []).length, source: 'ai.toolProtocol.apply_patch' });
+        if (!gate.allowed) return { success: false, error: gate.error || 'Blocked by policy' };
 
         const applied = [];
         for (const op of parsed.ops) {
