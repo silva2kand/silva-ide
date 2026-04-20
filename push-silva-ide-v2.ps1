@@ -8,6 +8,7 @@ param(
   [ValidateSet("none","public","private")]
   [string]$CreateRepo = "none",
   [string]$Tag = "",
+  [switch]$Force,
   [switch]$DryRun
 )
 
@@ -37,6 +38,20 @@ if (-not $DryRun) {
   if ($current) { Write-Host "Working tree is dirty. This is OK for subtree split, but do NOT commit unintended files." -ForegroundColor Yellow }
 }
 
+if (-not $DryRun -and -not $Force) {
+  $staged = (& git diff --name-only --cached)
+  if ($staged) {
+    $bad = @()
+    foreach ($p in $staged) {
+      if (-not $p) { continue }
+      if ($p -notlike "$Prefix/*") { $bad += $p }
+    }
+    if ($bad.Count -gt 0) {
+      throw "Staged changes exist outside prefix. Re-run with -Force if intended.`n$($bad -join "`n")"
+    }
+  }
+}
+
 if (-not $DryRun) {
   & git branch -D $Branch 2>$null | Out-Null
 }
@@ -52,7 +67,7 @@ if ($CreateRepo -ne "none") {
     if (-not $exists) {
       $flag = "--public"
       if ($CreateRepo -eq "private") { $flag = "--private" }
-      ExecArgs "gh" @("repo","create",$Repo,$flag,"--confirm")
+      ExecArgs "gh" @("repo","create",$Repo,$flag)
     }
   }
 }
