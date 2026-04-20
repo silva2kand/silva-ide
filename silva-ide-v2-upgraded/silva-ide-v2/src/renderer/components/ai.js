@@ -153,6 +153,7 @@ window.AIManager = (() => {
 
   function setActionLogFilter(mode) {
     actionLogFilter = (mode === 'failed' || mode === 'approval') ? mode : 'all';
+    window.silva?.store?.set?.('ui.aiActionLogFilter', actionLogFilter);
     const all = document.getElementById('btn-log-filter-all');
     const fail = document.getElementById('btn-log-filter-failed');
     const ap = document.getElementById('btn-log-filter-approval');
@@ -1103,13 +1104,15 @@ window.AIManager = (() => {
       store.get('ui.aiSuggestionsHidden', null),
       store.get('ui.aiWebResearch', null),
       store.get('ui.aiAutoExecute', null),
+      store.get('ui.aiActionLogFilter', 'all'),
       store.get('ai.capabilities', null),
       store.get('ai.perfMode', null),
-    ]).then(([c, s, r, ae, cap, pm]) => {
+    ]).then(([c, s, r, ae, lf, cap, pm]) => {
       if (c === true) panel.classList.add('ai-controls-hidden');
       if (s === true) panel.classList.add('ai-suggestions-hidden');
       if (typeof r === 'boolean') aiWebResearchEnabled = r;
       if (typeof ae === 'boolean') autoActionRequested = ae;
+      if (lf === 'all' || lf === 'failed' || lf === 'approval') actionLogFilter = lf;
       if (cap && typeof cap === 'object') {
         capabilities = {
           turboQuant: cap.turboQuant !== false,
@@ -1120,6 +1123,7 @@ window.AIManager = (() => {
       if (pm === 'fast' || pm === 'balanced' || pm === 'quality') perfMode = pm;
       updateAiHeaderToggles();
       updateCapabilitiesUI();
+      setActionLogFilter(actionLogFilter);
       refreshGatePending().catch(() => {});
       window.silva?.store?.get?.('ui.aiActionLogOpen', false).then((open) => {
         const box = document.getElementById('ai-action-log-wrap');
