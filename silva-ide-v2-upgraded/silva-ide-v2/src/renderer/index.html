@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* https:; worker-src 'self' blob:;">
+<title>Silva IDE</title>
+<link rel="stylesheet" href="styles/main.css">
+<link rel="stylesheet" href="../../node_modules/xterm/css/xterm.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Title Bar -->
+  <div id="titlebar">
+    <div id="titlebar-left">
+      <button class="tb-btn" id="btn-toggle-sidebar" title="Toggle Sidebar (Ctrl+B)">☰</button>
+      <div class="logo">⬡ Silva IDE</div>
+    </div>
+    <div id="titlebar-center">
+      <span id="folder-name">No folder open</span>
+      <span id="git-branch" class="git-badge hidden"></span>
+    </div>
+    <div id="titlebar-right">
+      <button class="tb-btn" id="btn-toggle-ai" title="Toggle AI Panel (Ctrl+Shift+A)">AI</button>
+      <button class="tb-btn" id="btn-settings" title="Settings">⚙</button>
+    </div>
+  </div>
+
+  <!-- Activity Bar -->
+  <div id="activity-bar">
+    <button class="ab-btn active" data-panel="explorer" title="Explorer">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+    </button>
+    <button class="ab-btn" data-panel="search" title="Search">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    </button>
+    <button class="ab-btn" data-panel="git" title="Source Control">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7M6 9v12"/></svg>
+    </button>
+    <button class="ab-btn" data-panel="extensions" title="Automation (Jarvice)">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+    </button>
+    <div style="flex:1"></div>
+    <button class="ab-btn" data-panel="settings" title="Settings">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+    </button>
+  </div>
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="panel-explorer" class="sidebar-panel active">
+      <div class="panel-header">
+        <span>EXPLORER</span>
+        <div class="panel-header-actions">
+          <button class="icon-btn" id="btn-new-file" title="New File">+F</button>
+          <button class="icon-btn" id="btn-new-folder" title="New Folder">+D</button>
+          <button class="icon-btn" id="btn-refresh-tree" title="Refresh">↺</button>
+        </div>
+      </div>
+      <div id="file-tree"></div>
+      <div id="no-folder-msg">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#45475a" stroke-width="1"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+        <p>No folder open</p>
+        <button class="btn-primary" id="btn-open-folder-2">Open Folder</button>
+      </div>
+    </div>
+    <div id="panel-search" class="sidebar-panel"></div>
+    <div id="panel-git" class="sidebar-panel"></div>
+    <div id="panel-extensions" class="sidebar-panel"></div>
+    <div id="panel-settings" class="sidebar-panel"></div>
+  </div>
+
+  <div class="resizer resizer-h" id="resizer-sidebar"></div>
+
+  <!-- Main Content Area -->
+  <div id="main-content">
+    <div id="tab-bar">
+      <div id="tabs-container"></div>
+      <div style="display:flex;gap:4px;padding:0 8px">
+        <button class="icon-btn" id="btn-split-editor" title="Split Editor">◫</button>
+        <button class="icon-btn" id="btn-live-preview" title="Live Preview">👁</button>
+      </div>
+    </div>
+
+    <div id="editor-area">
+      <div id="editor-container">
+        <div id="monaco-editor"></div>
+        <div id="welcome-screen">
+          <div class="welcome-logo">⬡</div>
+          <h1>Silva IDE</h1>
+          <p>AI-powered cross-platform code editor</p>
+          <div class="welcome-actions">
+            <button class="welcome-btn" id="wb-open-folder">Open Folder</button>
+            <button class="welcome-btn" id="wb-open-file">Open File</button>
+            <button class="welcome-btn" id="wb-new-file">New File</button>
+            <button class="welcome-btn" id="wb-create-project" style="color:var(--green)">Create Project</button>
+          </div>
+          <div class="welcome-shortcuts">
+            <div class="shortcut-row"><kbd>Ctrl+Shift+O</kbd><span>Open folder</span></div>
+            <div class="shortcut-row"><kbd>Ctrl+N</kbd><span>New file</span></div>
+            <div class="shortcut-row"><kbd>Ctrl+S</kbd><span>Save file</span></div>
+            <div class="shortcut-row"><kbd>Ctrl+`</kbd><span>Toggle terminal</span></div>
+            <div class="shortcut-row"><kbd>Ctrl+Shift+A</kbd><span>Toggle AI panel</span></div>
+            <div class="shortcut-row"><kbd>F5</kbd><span>Run file</span></div>
+          </div>
+        </div>
+      </div>
+      <div id="editor-container-right" class="hidden">
+        <div id="monaco-editor-right"></div>
+      </div>
+      <div id="preview-panel" class="hidden">
+        <div class="panel-header" style="background:var(--mantle);border-bottom:1px solid var(--surface0)">
+          <span>LIVE PREVIEW</span>
+          <button class="icon-btn" id="btn-close-preview">×</button>
+        </div>
+        <iframe id="preview-frame" style="width:100%;height:100%;border:none;background:white"></iframe>
+      </div>
+    </div>
+
+    <div class="resizer resizer-v" id="resizer-terminal"></div>
+
+    <!-- Bottom Panel -->
+    <div id="bottom-panel">
+      <div id="bottom-tabs">
+        <button class="bottom-tab active" data-tab="terminal">TERMINAL</button>
+        <button class="bottom-tab" data-tab="problems">PROBLEMS</button>
+        <button class="bottom-tab" data-tab="output">OUTPUT</button>
+        <button class="bottom-tab" data-tab="debug">DEBUG CONSOLE</button>
+        <div style="flex:1"></div>
+        <button class="icon-btn" id="btn-clear-terminal" title="Clear">✕</button>
+        <button class="icon-btn" id="btn-new-terminal" title="New Terminal">+</button>
+        <button class="icon-btn" id="btn-close-panel" title="Close Panel">×</button>
+      </div>
+      <div id="bottom-content">
+        <div id="tab-terminal" class="bottom-tab-content active">
+          <div id="terminal-container"></div>
+        </div>
+        <div id="tab-problems" class="bottom-tab-content">
+          <div id="problems-list" style="padding:8px;font-size:12px;color:#a6adc8">No problems detected.</div>
+        </div>
+        <div id="tab-output" class="bottom-tab-content">
+          <pre id="output-log" style="margin:0;padding:8px;font-size:12px;color:#a6adc8;overflow:auto;height:100%"></pre>
+        </div>
+        <div id="tab-debug" class="bottom-tab-content">
+          <div style="padding:8px;font-size:12px;color:#a6adc8">Debug console output will appear here.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div id="status-bar">
+      <div id="status-left">
+        <span id="status-branch" class="status-item">main</span>
+        <span id="status-problems" class="status-item">0 errors</span>
+      </div>
+      <div id="status-right">
+        <span id="status-lang" class="status-item clickable">Plain Text</span>
+        <span id="status-spaces" class="status-item">Spaces: 4</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="resizer resizer-h" id="resizer-ai"></div>
+
+  <!-- AI Panel -->
+  <div id="ai-panel" class="hidden">
+    <!-- content rendered by ai.js -->
+  </div>
+
+  <!-- Context Menu -->
+  <div id="context-menu" class="hidden">
+    <div class="ctx-item" data-action="open">Open</div>
+    <div class="ctx-item" data-action="rename">Rename</div>
+    <div class="ctx-item" data-action="delete">Delete</div>
+    <div class="ctx-separator"></div>
+    <div class="ctx-item" data-action="new-file">New File</div>
+    <div class="ctx-item" data-action="new-folder">New Folder</div>
+  </div>
+
+  <!-- Notifications -->
+  <div id="notifications"></div>
+
+</div>
+
+<!-- Scripts -->
+<script src="../../node_modules/xterm/lib/xterm.js"></script>
+<script src="../../node_modules/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
+<script>
+  const monacoScript = document.createElement('script');
+  monacoScript.src = '../../node_modules/monaco-editor/min/vs/loader.js';
+  monacoScript.onload = () => {
+    require.config({ paths: { 'vs': '../../node_modules/monaco-editor/min/vs' } });
+    require(['vs/editor/editor.main'], () => { document.dispatchEvent(new Event('monaco-ready')); });
+  };
+  document.head.appendChild(monacoScript);
+</script>
+<script src="components/editor.js"></script>
+<script src="components/fileTree.js"></script>
+<script src="components/terminal.js"></script>
+<script src="components/ai.js"></script>
+<script src="components/automation.js"></script>
+<script src="components/git.js"></script>
+<script src="components/search.js"></script>
+<script src="components/settings.js"></script>
+<script src="components/gate.js"></script>
+<script src="components/metrics.js"></script>
+<script src="components/kernel-versions.js"></script>
+<script src="components/security.js"></script>
+<script src="components/sandbox.js"></script>
+<script src="utils/languageDetect.js"></script>
+<script src="utils/notifications.js"></script>
+<script src="utils/keybindings.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

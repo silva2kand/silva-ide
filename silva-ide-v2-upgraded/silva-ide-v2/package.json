@@ -1,0 +1,41 @@
+{
+  "name": "silva-ide",
+  "version": "1.0.0",
+  "description": "Silva IDE — AI-powered cross-platform code editor",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.52.0",
+    "openai": "^4.67.0",
+    "@anthropic-ai/sdk": "^0.30.0",
+    "electron-store": "^10.0.0",
+    "node-pty": "^1.0.0",
+    "simple-git": "^3.27.0",
+    "chokidar": "^4.0.1",
+    "marked": "^14.1.3",
+    "highlight.js": "^11.10.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.7"
+  },
+  "build": {
+    "appId": "com.silva.ide",
+    "productName": "Silva IDE",
+    "directories": { "output": "dist" },
+    "files": ["src/**/*", "public/**/*", "node_modules/**/*"],
+    "npmRebuild": false,
+    "win": { "target": "nsis", "icon": "public/icon.ico" },
+    "mac": { "target": "dmg", "icon": "public/icon.icns" },
+    "linux": { "target": "AppImage", "icon": "public/icon.png" }
+  }
+}
