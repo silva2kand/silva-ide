@@ -96,6 +96,7 @@ window.AIManager = (() => {
   let autoActionRequested = true;
   const pendingInserts = [];
   const actionLog = [];
+  let gatePendingCount = 0;
 
   function logAction(kind, target, ok, detail = '', payload = null) {
     actionLog.unshift({
@@ -132,6 +133,36 @@ window.AIManager = (() => {
       </div>`;
     });
     el.innerHTML = rows.join('');
+  }
+
+  function updateGateBadge(count) {
+    gatePendingCount = Math.max(0, Number(count || 0));
+    const b = document.getElementById('gate-badge-count');
+    if (b) {
+      b.textContent = String(gatePendingCount);
+      b.style.display = gatePendingCount > 0 ? 'inline-flex' : 'none';
+    }
+    const cap = document.getElementById('cap-approvals');
+    if (cap) cap.textContent = `Approvals: ${gatePendingCount}`;
+  }
+
+  async function refreshGatePending() {
+    try {
+      if (!window.silva?.gate?.getPending) { updateGateBadge(0); return; }
+      const items = await window.silva.gate.getPending();
+      updateGateBadge(Array.isArray(items) ? items.length : 0);
+    } catch {
+      updateGateBadge(gatePendingCount);
+    }
+  }
+
+  function openApprovalsPanel() {
+    const btn = document.querySelector('.ab-btn[data-panel="extensions"]');
+    btn?.click?.();
+    setTimeout(() => {
+      const el = document.getElementById('gate-content');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
   }
 
   function flushPendingInserts() {
@@ -540,6 +571,7 @@ window.AIManager = (() => {
       const res = await window.silva.gate.enforce(action, 'jarvice', context || {});
       if (res?.allowed) return { allowed: true, gate: res };
       if (res?.needsApproval) {
+        refreshGatePending().catch(() => {});
         const msg = `Approval required for ${res?.action || action}. gateId=${res?.gateId || 'unknown'}`;
         return { allowed: false, error: msg, gate: res };
       }
@@ -669,6 +701,7 @@ window.AIManager = (() => {
     if (cap) cap.textContent = `Web Research: ${aiWebResearchEnabled ? 'ON' : 'OFF'}`;
     const autoCap = document.getElementById('cap-autoexec');
     if (autoCap) autoCap.textContent = `Auto Execute: ${autoActionRequested ? 'ON' : 'OFF'}`;
+    updateGateBadge(gatePendingCount);
   }
 
   function updateCapabilitiesUI() {
@@ -1000,6 +1033,10 @@ window.AIManager = (() => {
     restoreAiUiState();
     bindEvents();
     forceEnableAll();
+    refreshGatePending().catch(() => {});
+    window.silva?.gate?.onPending?.((items) => {
+      updateGateBadge(Array.isArray(items) ? items.length : 0);
+    });
     loadProviderSettings().then(() => {
       autoDetectLocalAI(true);
       startWatchdog();
@@ -1055,6 +1092,7 @@ window.AIManager = (() => {
       if (pm === 'fast' || pm === 'balanced' || pm === 'quality') perfMode = pm;
       updateAiHeaderToggles();
       updateCapabilitiesUI();
+      refreshGatePending().catch(() => {});
       window.silva?.store?.get?.('ui.aiActionLogOpen', false).then((open) => {
         const box = document.getElementById('ai-action-log-wrap');
         if (!box) return;
@@ -1190,6 +1228,10 @@ window.AIManager = (() => {
     <button class="icon-btn" id="btn-toggle-ai-suggestions" title="Hide/Show follow-ups">✦</button>
     <button class="icon-btn" id="btn-toggle-ai-research" title="Toggle web research">🌐</button>
     <button class="icon-btn" id="btn-toggle-auto-actions" title="Toggle auto actions">⚡</button>
+    <button class="icon-btn" id="btn-open-approvals" title="Open approvals">
+      🛡
+      <span id="gate-badge-count" style="display:none;margin-left:6px;background:var(--red);color:var(--base);min-width:16px;height:16px;border-radius:999px;align-items:center;justify-content:center;font-size:10px;font-weight:800;padding:0 5px">0</span>
+    </button>
     <button class="ai-scan-btn icon-btn" id="btn-ai-scan" title="Auto-detect local AI">⟳ Scan Local</button>
     <button class="icon-btn" id="btn-clear-ai">✕</button>
     <button class="icon-btn" id="btn-close-ai">×</button>
@@ -1253,6 +1295,7 @@ window.AIManager = (() => {
       <span style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px">✓ Mirofish Predictions</span>
       <span id="cap-web" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px">Web Research: OFF</span>
       <span id="cap-autoexec" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle automatic execution of FILE/Patch/Command blocks">Auto Execute: ON</span>
+      <span id="cap-approvals" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Open pending approvals">Approvals: 0</span>
       <span id="cap-turboquant" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle TurboQuant capability">TurboQuant: ON</span>
       <span id="cap-turbovec" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle TurboVec capability">TurboVec: OFF</span>
       <span id="cap-piper" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle Piper TTS capability">Piper TTS: OFF</span>
@@ -1328,6 +1371,8 @@ window.AIManager = (() => {
     document.getElementById('btn-toggle-ai-research')?.addEventListener('click', toggleAiResearch);
     document.getElementById('btn-toggle-auto-actions')?.addEventListener('click', toggleAutoActions);
     document.getElementById('cap-autoexec')?.addEventListener('click', toggleAutoActions);
+    document.getElementById('btn-open-approvals')?.addEventListener('click', openApprovalsPanel);
+    document.getElementById('cap-approvals')?.addEventListener('click', openApprovalsPanel);
     document.getElementById('cap-actionlog')?.addEventListener('click', toggleActionLog);
     document.getElementById('btn-retry-actions')?.addEventListener('click', () => retryFailedCommands());
     document.getElementById('btn-clear-actions')?.addEventListener('click', clearActionLog);
