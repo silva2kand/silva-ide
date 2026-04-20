@@ -99,13 +99,15 @@ window.AIManager = (() => {
   let gatePendingCount = 0;
   let actionLogFilter = 'all'; // all | failed | approval
   let actionLogAutoClear = false;
+  let actionLogFullPayloads = false;
 
   function serializeActionPayload(payload) {
     try {
       if (payload === null || typeof payload === 'undefined') return null;
-      if (typeof payload === 'string') return payload.length > 80000 ? payload.slice(0, 80000) : payload;
+      const maxLen = actionLogFullPayloads ? 500000 : 80000;
+      if (typeof payload === 'string') return payload.length > maxLen ? payload.slice(0, maxLen) : payload;
       const s = JSON.stringify(payload);
-      return s.length > 80000 ? s.slice(0, 80000) : s;
+      return s.length > maxLen ? s.slice(0, maxLen) : s;
     } catch {
       return null;
     }
@@ -119,7 +121,7 @@ window.AIManager = (() => {
 
   function exportActionsLog() {
     try {
-      const payload = JSON.stringify(actionLog, null, 2);
+      const payload = JSON.stringify(getActionsExportObject(), null, 2);
       navigator.clipboard.writeText(payload);
       window.notify?.(`Actions log copied (${actionLog.length})`, 'success');
     } catch (e) {
@@ -136,9 +138,11 @@ window.AIManager = (() => {
         filters: [{ name: 'JSON', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }],
       });
       if (!res?.success || !res.filePath) return;
-      const gate = await enforceGateAction('CODE_WRITE', { path: String(res.filePath), bytes: JSON.stringify(actionLog).length, source: 'ai.actions.export' });
+      const obj = getActionsExportObject();
+      const payload = JSON.stringify(obj, null, 2);
+      const gate = await enforceGateAction('CODE_WRITE', { path: String(res.filePath), bytes: payload.length, source: 'ai.actions.export' });
       if (!gate.allowed) { window.notify?.(gate.error || 'Blocked by policy', 'warning'); return; }
-      const w = await window.silva.fs.writeFile(res.filePath, JSON.stringify(actionLog, null, 2));
+      const w = await window.silva.fs.writeFile(res.filePath, payload);
       if (!w?.success) { window.notify?.(w?.error || 'Save failed', 'error'); return; }
       window.notify?.('Actions log saved', 'success');
     } catch (e) {
@@ -148,7 +152,13 @@ window.AIManager = (() => {
 
   function exportActionsLogMarkdown() {
     try {
+      const meta = getActionsExportObject()?.meta || {};
       const lines = [];
+      lines.push(`Project: ${meta.projectRoot || ''}`);
+      lines.push(`Provider1: ${(meta.providers?.p1?.providerId || '')} ${(meta.providers?.p1?.model || '')}`.trim());
+      lines.push(`Provider2: ${(meta.providers?.p2?.providerId || '')} ${(meta.providers?.p2?.model || '')}`.trim());
+      lines.push(`Active: ${String(meta.activeMode || '')}`);
+      lines.push('');
       lines.push('| time | ok | kind | target | detail |');
       lines.push('|---|---:|---|---|---|');
       for (const x of actionLog.slice(0, 80)) {
@@ -166,11 +176,45 @@ window.AIManager = (() => {
     }
   }
 
+  function getActionsExportObject() {
+    const root = window.FileTreeManager?.getRootPath?.() || '';
+    const p1ProviderId = document.getElementById('p1-provider')?.value || provider1?.id || '';
+    const p2ProviderId = document.getElementById('p2-provider')?.value || provider2?.id || '';
+    const p1Model = document.getElementById('p1-model')?.value || provider1?.model || '';
+    const p2Model = document.getElementById('p2-model')?.value || provider2?.model || '';
+    return {
+      meta: {
+        exportedAt: new Date().toISOString(),
+        projectRoot: root,
+        activeMode: activeProvider,
+        perfMode,
+        autoExecute: autoActionRequested,
+        webResearch: aiWebResearchEnabled,
+        approvalsPending: gatePendingCount,
+        actionLogFilter,
+        actionLogAutoClear,
+        actionLogFullPayloads,
+        providers: {
+          p1: { providerId: p1ProviderId, model: p1Model },
+          p2: { providerId: p2ProviderId, model: p2Model },
+        },
+      },
+      actions: actionLog,
+    };
+  }
+
   function toggleActionLogAutoClear() {
     actionLogAutoClear = !actionLogAutoClear;
     window.silva?.store?.set?.('ui.aiActionLogAutoClear', actionLogAutoClear);
     updateCapabilitiesUI();
     window.notify?.(`Auto-clear actions log: ${actionLogAutoClear ? 'ON' : 'OFF'}`, 'info');
+  }
+
+  function toggleActionLogFullPayloads() {
+    actionLogFullPayloads = !actionLogFullPayloads;
+    window.silva?.store?.set?.('ui.aiActionLogFullPayloads', actionLogFullPayloads);
+    updateCapabilitiesUI();
+    window.notify?.(`Full payloads: ${actionLogFullPayloads ? 'ON' : 'OFF'}`, 'info');
   }
 
   function isApprovalNeeded(entry) {
@@ -247,6 +291,16 @@ window.AIManager = (() => {
       const showPatchBtn = (x.kind === 'apply_patch' && x.payload)
         ? `<button class="icon-btn log-show-patch" data-at="${esc(String(x.at || ''))}" title="Show patch" style="margin-left:6px;font-size:10px;padding:1px 6px">Show Patch</button>`
         : '';
+      let patchForCopy = '';
+      if (x.kind === 'apply_patch' && x.payload) {
+        try { patchForCopy = String(JSON.parse(String(x.payload))?.patch || ''); } catch {}
+      }
+      const copyPatchBtn = (x.kind === 'apply_patch' && patchForCopy)
+        ? `<button class="icon-btn log-copy-patch" data-at="${esc(String(x.at || ''))}" title="Copy patch text" style="margin-left:6px;font-size:10px;padding:1px 6px">Copy Patch</button>`
+        : '';
+      const dryRunPatchBtn = (x.kind === 'apply_patch' && patchForCopy)
+        ? `<button class="icon-btn log-dryrun-patch" data-at="${esc(String(x.at || ''))}" title="Dry-run patch (no writes)" style="margin-left:6px;font-size:10px;padding:1px 6px">Dry‑Run</button>`
+        : '';
       return `<div style="font-size:11px;color:var(--subtext1);padding:4px 0;border-bottom:1px dashed var(--surface1)">
         <span style="color:var(--overlay0)">[${t}]</span>
         <span style="color:${color};font-weight:700;margin-left:6px">${status}</span>
@@ -262,6 +316,8 @@ window.AIManager = (() => {
         ${retryWriteBtn}
         ${retryPatchBtn}
         ${showPatchBtn}
+        ${copyPatchBtn}
+        ${dryRunPatchBtn}
       </div>`;
     });
     el.innerHTML = rows.join('');
@@ -805,7 +861,7 @@ window.AIManager = (() => {
       }
       return { success: true, query: q, results };
     },
-    apply_patch: async ({ patch }) => {
+    apply_patch: async ({ patch, dryRun = false }) => {
       try {
         if (!window.silva?.fs?.readFile || !window.silva?.fs?.writeFile) {
           return { success: false, error: 'fs.readFile/writeFile unavailable' };
@@ -816,8 +872,33 @@ window.AIManager = (() => {
         const parsed = parsePatchText(patch);
         if (!parsed.ok) return { success: false, error: parsed.error || 'Invalid patch' };
         const filesList = (parsed.ops || []).map(op => op.file).filter(Boolean).slice(0, 20);
-        const gate = await enforceGateAction('CODE_WRITE', { files: filesList, opCount: (parsed.ops || []).length, source: 'ai.toolProtocol.apply_patch' });
-        if (!gate.allowed) return { success: false, error: gate.error || 'Blocked by policy' };
+        if (!dryRun) {
+          const gate = await enforceGateAction('CODE_WRITE', { files: filesList, opCount: (parsed.ops || []).length, source: 'ai.toolProtocol.apply_patch' });
+          if (!gate.allowed) return { success: false, error: gate.error || 'Blocked by policy' };
+        }
+
+        if (dryRun) {
+          const results = [];
+          for (const op of parsed.ops) {
+            const abs = resolvePathWithinRoot(root, op.file);
+            if (!abs) return { success: false, error: `Refusing to access outside project root: ${op.file}` };
+            if (op.type === 'add') {
+              results.push({ file: op.file, type: 'add', ok: true, bytes: String(op.content || '').length });
+              continue;
+            }
+            if (op.type === 'update') {
+              const rr = await window.silva.fs.readFile(abs);
+              if (!rr?.success) { results.push({ file: op.file, type: 'update', ok: false, error: rr?.error || 'Read failed' }); continue; }
+              const out = applyUnifiedHunksToText(String(rr.content || ''), op.hunkLines || []);
+              if (!out.ok) { results.push({ file: op.file, type: 'update', ok: false, error: out.error || 'Patch failed' }); continue; }
+              results.push({ file: op.file, type: 'update', ok: true, bytesBefore: String(rr.content || '').length, bytesAfter: String(out.text || '').length });
+              continue;
+            }
+            results.push({ file: op.file, type: op.type, ok: false, error: 'Unknown op type' });
+          }
+          const ok = results.every(r => r.ok);
+          return { success: ok, dryRun: true, results, error: ok ? '' : 'Dry-run detected failures' };
+        }
 
         const applied = [];
         for (const op of parsed.ops) {
@@ -865,11 +946,13 @@ window.AIManager = (() => {
     const piper = document.getElementById('cap-piper');
     const perf = document.getElementById('cap-perf');
     const ac = document.getElementById('cap-autoclear');
+    const fp = document.getElementById('cap-fullpayloads');
     if (tq) tq.textContent = `TurboQuant: ${capabilities.turboQuant ? 'ON' : 'OFF'}`;
     if (tv) tv.textContent = `TurboVec: ${capabilities.turboVec ? 'ON' : 'OFF'}`;
     if (piper) piper.textContent = `Piper TTS: ${capabilities.piper ? 'ON' : 'OFF'}`;
     if (perf) perf.textContent = `Speed: ${String(perfMode || 'fast').toUpperCase()}`;
     if (ac) ac.textContent = `AutoClear Log: ${actionLogAutoClear ? 'ON' : 'OFF'}`;
+    if (fp) fp.textContent = `Full Payloads: ${actionLogFullPayloads ? 'ON' : 'OFF'}`;
   }
 
   function getMaxTokensFor(pid) {
@@ -1234,15 +1317,17 @@ window.AIManager = (() => {
       store.get('ui.aiAutoExecute', null),
       store.get('ui.aiActionLogFilter', 'all'),
       store.get('ui.aiActionLogAutoClear', null),
+      store.get('ui.aiActionLogFullPayloads', null),
       store.get('ai.capabilities', null),
       store.get('ai.perfMode', null),
-    ]).then(([c, s, r, ae, lf, acl, cap, pm]) => {
+    ]).then(([c, s, r, ae, lf, acl, fp, cap, pm]) => {
       if (c === true) panel.classList.add('ai-controls-hidden');
       if (s === true) panel.classList.add('ai-suggestions-hidden');
       if (typeof r === 'boolean') aiWebResearchEnabled = r;
       if (typeof ae === 'boolean') autoActionRequested = ae;
       if (lf === 'all' || lf === 'failed' || lf === 'approval') actionLogFilter = lf;
       if (typeof acl === 'boolean') actionLogAutoClear = acl;
+      if (typeof fp === 'boolean') actionLogFullPayloads = fp;
       if (cap && typeof cap === 'object') {
         capabilities = {
           turboQuant: cap.turboQuant !== false,
@@ -1468,6 +1553,7 @@ window.AIManager = (() => {
       <span id="cap-piper" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle Piper TTS capability">Piper TTS: OFF</span>
       <span id="cap-perf" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Cycle speed mode (fast/balanced/quality)">Speed: FAST</span>
       <span id="cap-autoclear" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Auto-clear actions log on new session">AutoClear Log: OFF</span>
+      <span id="cap-fullpayloads" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Store larger action payloads for retries/exports">Full Payloads: OFF</span>
       <span id="cap-actionlog" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Show/hide executed actions log">Actions Log</span>
     </div>
   </div>
@@ -1612,6 +1698,38 @@ window.AIManager = (() => {
         window.silva?.dialog?.showMessage?.({ title: 'Patch', message: clipped.truncated ? 'Patch (truncated)' : 'Patch', detail: clipped.text });
         return;
       }
+      const copyPatchBtn = e.target?.closest?.('.log-copy-patch');
+      if (copyPatchBtn) {
+        const at = String(copyPatchBtn.getAttribute('data-at') || '').trim();
+        const entry = actionLog.find(x => String(x?.at) === at && x?.kind === 'apply_patch');
+        let pj = null;
+        try { pj = entry?.payload ? JSON.parse(String(entry.payload)) : null; } catch {}
+        const patch = String(pj?.patch || '').trim();
+        if (patch) navigator.clipboard.writeText(patch);
+        window.notify?.(patch ? 'Patch copied' : 'No patch text', patch ? 'success' : 'warning');
+        return;
+      }
+      const dryRunBtn = e.target?.closest?.('.log-dryrun-patch');
+      if (dryRunBtn) {
+        const at = String(dryRunBtn.getAttribute('data-at') || '').trim();
+        const entry = actionLog.find(x => String(x?.at) === at && x?.kind === 'apply_patch');
+        let pj = null;
+        try { pj = entry?.payload ? JSON.parse(String(entry.payload)) : null; } catch {}
+        const patch = String(pj?.patch || '').trim();
+        if (!patch) { window.notify?.('No patch text', 'warning'); return; }
+        toolProtocol.apply_patch({ patch, dryRun: true })
+          .then((r) => {
+            const results = Array.isArray(r?.results) ? r.results : [];
+            const ok = !!r?.success;
+            const summary = `${ok ? 'Dry-run OK' : 'Dry-run FAIL'} (${results.filter(x => x.ok).length}/${results.length})`;
+            const detail = results.map(x => `${x.ok ? 'OK' : 'FAIL'} ${x.type} ${x.file}${x.error ? ` - ${x.error}` : ''}`).join('\n');
+            window.silva?.dialog?.showMessage?.({ title: 'Dry-run patch', message: summary, detail });
+          })
+          .catch((err) => {
+            window.notify?.(`Dry-run failed: ${err?.message || err}`, 'error');
+          });
+        return;
+      }
       const copyPathBtn = e.target?.closest?.('.log-copy-path');
       if (copyPathBtn) {
         const file = String(copyPathBtn.getAttribute('data-file') || '').trim();
@@ -1655,6 +1773,7 @@ window.AIManager = (() => {
     document.getElementById('cap-piper')?.addEventListener('click', () => setCapability('piper', !capabilities.piper));
     document.getElementById('cap-perf')?.addEventListener('click', () => cyclePerfMode());
     document.getElementById('cap-autoclear')?.addEventListener('click', toggleActionLogAutoClear);
+    document.getElementById('cap-fullpayloads')?.addEventListener('click', toggleActionLogFullPayloads);
     document.getElementById('btn-swap-providers').addEventListener('click', swapProviders);
     document.getElementById('btn-use-p1').addEventListener('click', () => setActive(1));
     document.getElementById('btn-use-p2').addEventListener('click', () => setActive(2));
