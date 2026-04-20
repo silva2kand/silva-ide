@@ -95,6 +95,43 @@ window.AIManager = (() => {
   let isRestoringHistory = false;
   let autoActionRequested = true;
   const pendingInserts = [];
+  const actionLog = [];
+
+  function logAction(kind, target, ok, detail = '') {
+    actionLog.unshift({
+      at: Date.now(),
+      kind: String(kind || 'action'),
+      target: String(target || ''),
+      ok: !!ok,
+      detail: String(detail || ''),
+    });
+    if (actionLog.length > 80) actionLog.pop();
+    renderActionLog();
+  }
+
+  function renderActionLog() {
+    const el = document.getElementById('ai-action-log');
+    if (!el) return;
+    if (!actionLog.length) {
+      el.innerHTML = '<div class="tl-empty">No executed actions yet</div>';
+      return;
+    }
+    const rows = actionLog.slice(0, 20).map((x) => {
+      const t = new Date(x.at).toLocaleTimeString();
+      const status = x.ok ? 'OK' : 'FAIL';
+      const color = x.ok ? 'var(--green)' : 'var(--red)';
+      const target = esc(x.target || '(none)');
+      const detail = x.detail ? ` · ${esc(x.detail)}` : '';
+      return `<div style="font-size:11px;color:var(--subtext1);padding:4px 0;border-bottom:1px dashed var(--surface1)">
+        <span style="color:var(--overlay0)">[${t}]</span>
+        <span style="color:${color};font-weight:700;margin-left:6px">${status}</span>
+        <span style="margin-left:6px">${esc(x.kind)}:</span>
+        <span style="margin-left:4px">${target}</span>
+        <span style="color:var(--overlay0)">${detail}</span>
+      </div>`;
+    });
+    el.innerHTML = rows.join('');
+  }
 
   function flushPendingInserts() {
     try {
@@ -324,9 +361,11 @@ window.AIManager = (() => {
         if (!r?.success) throw new Error(r?.error || 'Write failed');
         okCount += 1;
         appendThinkLine(msgEl, `Executor: wrote ${w.path}`);
+        logAction('write_file', w.path, true);
       } catch (e) {
         failCount += 1;
         appendThinkLine(msgEl, `Executor: write failed for ${w.path} (${e?.message || e})`);
+        logAction('write_file', w.path, false, e?.message || String(e));
       }
     }
 
@@ -337,9 +376,11 @@ window.AIManager = (() => {
         okCount += 1;
         const names = (r.applied || []).map(x => x.file).filter(Boolean).join(', ');
         appendThinkLine(msgEl, `Executor: patch applied${names ? ` (${names})` : ''}`);
+        logAction('apply_patch', names || 'patch', true);
       } catch (e) {
         failCount += 1;
         appendThinkLine(msgEl, `Executor: patch failed (${e?.message || e})`);
+        logAction('apply_patch', 'patch', false, e?.message || String(e));
       }
     }
 
@@ -349,9 +390,11 @@ window.AIManager = (() => {
         if (!r?.success) throw new Error(r?.error || 'Command failed');
         okCount += 1;
         appendThinkLine(msgEl, `Executor: command queued (${c})`);
+        logAction('run_command', c, true);
       } catch (e) {
         failCount += 1;
         appendThinkLine(msgEl, `Executor: command failed (${c}) (${e?.message || e})`);
+        logAction('run_command', c, false, e?.message || String(e));
       }
     }
 
@@ -398,8 +441,10 @@ window.AIManager = (() => {
         const r = await toolProtocol.write_file({ path: abs, content: w.content || '' });
         if (!r?.success) throw new Error(r?.error || 'Write failed');
         okCount += 1;
+        logAction('write_file', w.path, true);
       } catch {
         failCount += 1;
+        logAction('write_file', w.path, false);
       }
     }
 
@@ -408,8 +453,11 @@ window.AIManager = (() => {
         const r = await toolProtocol.apply_patch({ patch: p });
         if (!r?.success) throw new Error(r?.error || 'Patch failed');
         okCount += 1;
+        const names = (r.applied || []).map(x => x.file).filter(Boolean).join(', ');
+        logAction('apply_patch', names || 'patch', true);
       } catch {
         failCount += 1;
+        logAction('apply_patch', 'patch', false);
       }
     }
 
@@ -418,8 +466,10 @@ window.AIManager = (() => {
         const r = await toolProtocol.run_command({ command: c, cwd: root || undefined });
         if (!r?.success) throw new Error(r?.error || 'Command failed');
         okCount += 1;
+        logAction('run_command', c, true);
       } catch {
         failCount += 1;
+        logAction('run_command', c, false);
       }
     }
 
@@ -590,8 +640,12 @@ window.AIManager = (() => {
   function updateAiHeaderToggles() {
     const btn = document.getElementById('btn-toggle-ai-research');
     if (btn) btn.style.color = aiWebResearchEnabled ? 'var(--accent)' : '';
+    const autoBtn = document.getElementById('btn-toggle-auto-actions');
+    if (autoBtn) autoBtn.style.color = autoActionRequested ? 'var(--green)' : '';
     const cap = document.getElementById('cap-web');
     if (cap) cap.textContent = `Web Research: ${aiWebResearchEnabled ? 'ON' : 'OFF'}`;
+    const autoCap = document.getElementById('cap-autoexec');
+    if (autoCap) autoCap.textContent = `Auto Execute: ${autoActionRequested ? 'ON' : 'OFF'}`;
   }
 
   function updateCapabilitiesUI() {
@@ -940,11 +994,13 @@ window.AIManager = (() => {
 
   function forceEnableAll() {
     aiWebResearchEnabled = false;
+    autoActionRequested = true;
     capabilities = { turboQuant: true, turboVec: true, piper: true };
     perfMode = 'fast';
     updateAiHeaderToggles();
     updateCapabilitiesUI();
     window.silva?.store?.set?.('ui.aiWebResearch', false);
+    window.silva?.store?.set?.('ui.aiAutoExecute', true);
     window.silva?.store?.set?.('ai.capabilities', capabilities);
     window.silva?.store?.set?.('ai.perfMode', perfMode);
   }
@@ -958,12 +1014,14 @@ window.AIManager = (() => {
       store.get('ui.aiControlsHidden', null),
       store.get('ui.aiSuggestionsHidden', null),
       store.get('ui.aiWebResearch', null),
+      store.get('ui.aiAutoExecute', null),
       store.get('ai.capabilities', null),
       store.get('ai.perfMode', null),
-    ]).then(([c, s, r, cap, pm]) => {
+    ]).then(([c, s, r, ae, cap, pm]) => {
       if (c === true) panel.classList.add('ai-controls-hidden');
       if (s === true) panel.classList.add('ai-suggestions-hidden');
       if (typeof r === 'boolean') aiWebResearchEnabled = r;
+      if (typeof ae === 'boolean') autoActionRequested = ae;
       if (cap && typeof cap === 'object') {
         capabilities = {
           turboQuant: cap.turboQuant !== false,
@@ -974,6 +1032,12 @@ window.AIManager = (() => {
       if (pm === 'fast' || pm === 'balanced' || pm === 'quality') perfMode = pm;
       updateAiHeaderToggles();
       updateCapabilitiesUI();
+      window.silva?.store?.get?.('ui.aiActionLogOpen', false).then((open) => {
+        const box = document.getElementById('ai-action-log-wrap');
+        if (!box) return;
+        if (open) box.classList.remove('hidden');
+        else box.classList.add('hidden');
+      }).catch(() => {});
     }).catch(() => {});
   }
 
@@ -998,6 +1062,22 @@ window.AIManager = (() => {
     window.silva?.store?.set('ui.aiWebResearch', aiWebResearchEnabled);
     updateAiHeaderToggles();
     sysMsg(aiWebResearchEnabled ? '🌐 Web research enabled' : '🌐 Web research disabled');
+  }
+
+  function toggleAutoActions() {
+    autoActionRequested = !autoActionRequested;
+    window.silva?.store?.set('ui.aiAutoExecute', autoActionRequested);
+    updateAiHeaderToggles();
+    sysMsg(autoActionRequested ? '🤖 Auto actions enabled' : '🤖 Auto actions disabled');
+  }
+
+  function toggleActionLog() {
+    const box = document.getElementById('ai-action-log-wrap');
+    if (!box) return;
+    box.classList.toggle('hidden');
+    const open = !box.classList.contains('hidden');
+    window.silva?.store?.set?.('ui.aiActionLogOpen', open);
+    if (open) renderActionLog();
   }
 
   async function setCapability(key, value) {
@@ -1061,6 +1141,7 @@ window.AIManager = (() => {
     <button class="icon-btn" id="btn-toggle-ai-controls" title="Hide/Show AI controls">▾</button>
     <button class="icon-btn" id="btn-toggle-ai-suggestions" title="Hide/Show follow-ups">✦</button>
     <button class="icon-btn" id="btn-toggle-ai-research" title="Toggle web research">🌐</button>
+    <button class="icon-btn" id="btn-toggle-auto-actions" title="Toggle auto actions">⚡</button>
     <button class="ai-scan-btn icon-btn" id="btn-ai-scan" title="Auto-detect local AI">⟳ Scan Local</button>
     <button class="icon-btn" id="btn-clear-ai">✕</button>
     <button class="icon-btn" id="btn-close-ai">×</button>
@@ -1123,10 +1204,12 @@ window.AIManager = (() => {
       <span style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px">✓ Stability Layer</span>
       <span style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px">✓ Mirofish Predictions</span>
       <span id="cap-web" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px">Web Research: OFF</span>
+      <span id="cap-autoexec" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle automatic execution of FILE/Patch/Command blocks">Auto Execute: ON</span>
       <span id="cap-turboquant" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle TurboQuant capability">TurboQuant: ON</span>
       <span id="cap-turbovec" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle TurboVec capability">TurboVec: OFF</span>
       <span id="cap-piper" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle Piper TTS capability">Piper TTS: OFF</span>
       <span id="cap-perf" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Cycle speed mode (fast/balanced/quality)">Speed: FAST</span>
+      <span id="cap-actionlog" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Show/hide executed actions log">Actions Log</span>
     </div>
   </div>
 </div>
@@ -1134,6 +1217,11 @@ window.AIManager = (() => {
 <div class="resizer resizer-v" id="resizer-ai-chat"></div>
 
 <div id="ai-messages"></div>
+
+<div id="ai-action-log-wrap" class="hidden" style="max-height:180px;overflow:auto;border-top:1px solid var(--surface0);border-bottom:1px solid var(--surface0);padding:8px;background:var(--base)">
+  <div style="font-size:10px;color:var(--overlay0);font-weight:800;letter-spacing:1px;margin-bottom:6px">EXECUTED ACTIONS</div>
+  <div id="ai-action-log"><div class="tl-empty">No executed actions yet</div></div>
+</div>
 
 <div id="ai-suggestions" class="hidden"></div>
 
@@ -1185,6 +1273,9 @@ window.AIManager = (() => {
     document.getElementById('btn-toggle-ai-controls')?.addEventListener('click', toggleAiControls);
     document.getElementById('btn-toggle-ai-suggestions')?.addEventListener('click', toggleAiSuggestions);
     document.getElementById('btn-toggle-ai-research')?.addEventListener('click', toggleAiResearch);
+    document.getElementById('btn-toggle-auto-actions')?.addEventListener('click', toggleAutoActions);
+    document.getElementById('cap-autoexec')?.addEventListener('click', toggleAutoActions);
+    document.getElementById('cap-actionlog')?.addEventListener('click', toggleActionLog);
     document.getElementById('cap-turboquant')?.addEventListener('click', () => setCapability('turboQuant', !capabilities.turboQuant));
     document.getElementById('cap-turbovec')?.addEventListener('click', () => setCapability('turboVec', !capabilities.turboVec));
     document.getElementById('cap-piper')?.addEventListener('click', () => setCapability('piper', !capabilities.piper));
@@ -2679,6 +2770,7 @@ window.AIManager = (() => {
           if (!window.EditorManager || typeof window.EditorManager.insertText !== 'function') {
             pendingInserts.push(insertBody);
             window.notify?.('Editor not ready yet — insert queued.', 'info');
+            logAction('insert', '(queued)', true);
             flushPendingInserts();
             return;
           }
@@ -2686,9 +2778,11 @@ window.AIManager = (() => {
           setTimeout(() => {
             window.EditorManager.insertText(insertBody);
             window.notify?.('Inserted', 'success');
+            logAction('insert', '(editor)', true);
           }, 30);
         } catch (e) {
           window.notify?.(`Insert failed: ${e.message || e}`, 'error');
+          logAction('insert', '(editor)', false, e?.message || String(e));
         }
       });
 
@@ -2715,10 +2809,12 @@ window.AIManager = (() => {
             const r = await window.silva.fs.writeFile(abs, parseFileBlock.content || '');
             if (!r?.success) { window.notify?.(`Write failed: ${r?.error || 'error'}`, 'error'); return; }
             window.notify?.(`Wrote: ${rel}`, 'success');
+            logAction('write_file', rel, true);
             window.FileTreeManager?.refreshTree?.();
             window.EditorManager?.openFileByPath?.(abs);
           } catch (e) {
             window.notify?.(`Write failed: ${e.message || e}`, 'error');
+            logAction('write_file', parseFileBlock.path, false, e?.message || String(e));
           }
         });
       }
@@ -2732,11 +2828,13 @@ window.AIManager = (() => {
             if (!r?.success) { window.notify?.(`Patch failed: ${r?.error || 'error'}`, 'error'); return; }
             const files = (r.applied || []).map(x => x.file).filter(Boolean);
             window.notify?.(files.length ? `Patched: ${files.join(', ')}` : 'Patch applied', 'success');
+            logAction('apply_patch', files.join(', ') || 'patch', true);
             window.FileTreeManager?.refreshTree?.();
             const firstAbs = r.applied?.[0]?.abs;
             if (firstAbs) window.EditorManager?.openFileByPath?.(firstAbs);
           } catch (e) {
             window.notify?.(`Patch failed: ${e.message || e}`, 'error');
+            logAction('apply_patch', 'patch', false, e?.message || String(e));
           }
         });
       }
