@@ -98,6 +98,24 @@ window.AIManager = (() => {
   const actionLog = [];
   let gatePendingCount = 0;
   let actionLogFilter = 'all'; // all | failed | approval
+  let actionLogAutoClear = false;
+
+  function serializeActionPayload(payload) {
+    try {
+      if (payload === null || typeof payload === 'undefined') return null;
+      if (typeof payload === 'string') return payload.length > 80000 ? payload.slice(0, 80000) : payload;
+      const s = JSON.stringify(payload);
+      return s.length > 80000 ? s.slice(0, 80000) : s;
+    } catch {
+      return null;
+    }
+  }
+
+  function clipText(s, maxLen) {
+    const t = String(s || '');
+    if (t.length <= maxLen) return { text: t, truncated: false };
+    return { text: t.slice(0, maxLen), truncated: true };
+  }
 
   function exportActionsLog() {
     try {
@@ -107,6 +125,52 @@ window.AIManager = (() => {
     } catch (e) {
       window.notify?.(`Export failed: ${e?.message || e}`, 'error');
     }
+  }
+
+  async function exportActionsLogToFile() {
+    try {
+      if (!window.silva?.fs?.saveDialog || !window.silva?.fs?.writeFile) { window.notify?.('Save unavailable', 'warning'); return; }
+      const res = await window.silva.fs.saveDialog({
+        title: 'Export actions log',
+        defaultPath: 'silva-actions-log.json',
+        filters: [{ name: 'JSON', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }],
+      });
+      if (!res?.success || !res.filePath) return;
+      const gate = await enforceGateAction('CODE_WRITE', { path: String(res.filePath), bytes: JSON.stringify(actionLog).length, source: 'ai.actions.export' });
+      if (!gate.allowed) { window.notify?.(gate.error || 'Blocked by policy', 'warning'); return; }
+      const w = await window.silva.fs.writeFile(res.filePath, JSON.stringify(actionLog, null, 2));
+      if (!w?.success) { window.notify?.(w?.error || 'Save failed', 'error'); return; }
+      window.notify?.('Actions log saved', 'success');
+    } catch (e) {
+      window.notify?.(`Save failed: ${e?.message || e}`, 'error');
+    }
+  }
+
+  function exportActionsLogMarkdown() {
+    try {
+      const lines = [];
+      lines.push('| time | ok | kind | target | detail |');
+      lines.push('|---|---:|---|---|---|');
+      for (const x of actionLog.slice(0, 80)) {
+        const t = new Date(x.at).toLocaleTimeString();
+        const ok = x.ok ? 'OK' : 'FAIL';
+        const kind = String(x.kind || '');
+        const target = String(x.target || '').replace(/\|/g, '\\|');
+        const detail = String(x.detail || '').replace(/\|/g, '\\|');
+        lines.push(`| ${t} | ${ok} | ${kind} | ${target} | ${detail} |`);
+      }
+      navigator.clipboard.writeText(lines.join('\n'));
+      window.notify?.('Actions log copied (markdown)', 'success');
+    } catch (e) {
+      window.notify?.(`Export failed: ${e?.message || e}`, 'error');
+    }
+  }
+
+  function toggleActionLogAutoClear() {
+    actionLogAutoClear = !actionLogAutoClear;
+    window.silva?.store?.set?.('ui.aiActionLogAutoClear', actionLogAutoClear);
+    updateCapabilitiesUI();
+    window.notify?.(`Auto-clear actions log: ${actionLogAutoClear ? 'ON' : 'OFF'}`, 'info');
   }
 
   function isApprovalNeeded(entry) {
@@ -121,7 +185,7 @@ window.AIManager = (() => {
       target: String(target || ''),
       ok: !!ok,
       detail: String(detail || ''),
-      payload: payload === null || typeof payload === 'undefined' ? null : String(payload),
+      payload: serializeActionPayload(payload),
     });
     if (actionLog.length > 80) actionLog.pop();
     renderActionLog();
@@ -151,11 +215,19 @@ window.AIManager = (() => {
       const gateBtn = needsApproval
         ? `<button class="icon-btn log-open-approvals" title="Open pending approvals" style="margin-left:8px;font-size:10px;padding:1px 6px">Open Approvals</button>`
         : '';
-      const openFileBtn = (x.kind === 'write_file' || x.kind === 'apply_patch') && (x.target || x.payload)
-        ? `<button class="icon-btn log-open-file" data-file="${esc(String(x.target || x.payload || ''))}" title="Open file" style="margin-left:6px;font-size:10px;padding:1px 6px">Open File</button>`
+      let fileForOpen = '';
+      if (x.kind === 'write_file') fileForOpen = String(x.target || '');
+      if (x.kind === 'apply_patch' && x.payload) {
+        try {
+          const pj = JSON.parse(String(x.payload));
+          if (Array.isArray(pj.files) && pj.files[0]) fileForOpen = String(pj.files[0]);
+        } catch {}
+      }
+      const openFileBtn = fileForOpen
+        ? `<button class="icon-btn log-open-file" data-at="${esc(String(x.at || ''))}" data-file="${esc(fileForOpen)}" title="Open file" style="margin-left:6px;font-size:10px;padding:1px 6px">Open File</button>`
         : '';
       const copyPathBtn = (x.kind === 'write_file' || x.kind === 'apply_patch') && (x.target || x.payload)
-        ? `<button class="icon-btn log-copy-path" data-file="${esc(String(x.target || x.payload || ''))}" title="Copy file path" style="margin-left:6px;font-size:10px;padding:1px 6px">Copy Path</button>`
+        ? `<button class="icon-btn log-copy-path" data-file="${esc(String(fileForOpen || x.target || ''))}" title="Copy file path" style="margin-left:6px;font-size:10px;padding:1px 6px">Copy Path</button>`
         : '';
       const retryBtn = (!x.ok && x.kind === 'run_command' && (x.payload || x.target))
         ? `<button class="icon-btn log-retry-cmd" data-cmd="${esc(String(x.payload || x.target || ''))}" title="Retry this command" style="margin-left:6px;font-size:10px;padding:1px 6px">Retry</button>`
@@ -165,6 +237,15 @@ window.AIManager = (() => {
         : '';
       const copyGateBtn = (needsApproval && gateId)
         ? `<button class="icon-btn log-copy-gate" data-gate="${esc(gateId)}" title="Copy gateId" style="margin-left:6px;font-size:10px;padding:1px 6px">Copy gateId</button>`
+        : '';
+      const retryWriteBtn = (!x.ok && x.kind === 'write_file' && x.payload)
+        ? `<button class="icon-btn log-retry-write" data-at="${esc(String(x.at || ''))}" title="Retry this write" style="margin-left:6px;font-size:10px;padding:1px 6px">Retry Write</button>`
+        : '';
+      const retryPatchBtn = (!x.ok && x.kind === 'apply_patch' && x.payload)
+        ? `<button class="icon-btn log-retry-patch" data-at="${esc(String(x.at || ''))}" title="Retry this patch" style="margin-left:6px;font-size:10px;padding:1px 6px">Retry Patch</button>`
+        : '';
+      const showPatchBtn = (x.kind === 'apply_patch' && x.payload)
+        ? `<button class="icon-btn log-show-patch" data-at="${esc(String(x.at || ''))}" title="Show patch" style="margin-left:6px;font-size:10px;padding:1px 6px">Show Patch</button>`
         : '';
       return `<div style="font-size:11px;color:var(--subtext1);padding:4px 0;border-bottom:1px dashed var(--surface1)">
         <span style="color:var(--overlay0)">[${t}]</span>
@@ -178,6 +259,9 @@ window.AIManager = (() => {
         ${retryBtn}
         ${copyCmdBtn}
         ${copyGateBtn}
+        ${retryWriteBtn}
+        ${retryPatchBtn}
+        ${showPatchBtn}
       </div>`;
     });
     el.innerHTML = rows.join('');
@@ -454,11 +538,13 @@ window.AIManager = (() => {
         if (!r?.success) throw new Error(r?.error || 'Write failed');
         okCount += 1;
         appendThinkLine(msgEl, `Executor: wrote ${w.path}`);
-        logAction('write_file', w.path, true);
+        const clipped = clipText(w.content || '', 50000);
+        logAction('write_file', w.path, true, '', { path: w.path, content: clipped.text, truncated: clipped.truncated });
       } catch (e) {
         failCount += 1;
         appendThinkLine(msgEl, `Executor: write failed for ${w.path} (${e?.message || e})`);
-        logAction('write_file', w.path, false, e?.message || String(e));
+        const clipped = clipText(w.content || '', 50000);
+        logAction('write_file', w.path, false, e?.message || String(e), { path: w.path, content: clipped.text, truncated: clipped.truncated });
       }
     }
 
@@ -467,13 +553,16 @@ window.AIManager = (() => {
         const r = await toolProtocol.apply_patch({ patch: p });
         if (!r?.success) throw new Error(r?.error || 'Patch failed');
         okCount += 1;
-        const names = (r.applied || []).map(x => x.file).filter(Boolean).join(', ');
+        const files = (r.applied || []).map(x => x.file).filter(Boolean);
+        const names = files.join(', ');
         appendThinkLine(msgEl, `Executor: patch applied${names ? ` (${names})` : ''}`);
-        logAction('apply_patch', names || 'patch', true);
+        const clipped = clipText(p || '', 80000);
+        logAction('apply_patch', names || 'patch', true, '', { files, patch: clipped.text, truncated: clipped.truncated });
       } catch (e) {
         failCount += 1;
         appendThinkLine(msgEl, `Executor: patch failed (${e?.message || e})`);
-        logAction('apply_patch', 'patch', false, e?.message || String(e));
+        const clipped = clipText(p || '', 80000);
+        logAction('apply_patch', 'patch', false, e?.message || String(e), { files: [], patch: clipped.text, truncated: clipped.truncated });
       }
     }
 
@@ -534,10 +623,12 @@ window.AIManager = (() => {
         const r = await toolProtocol.write_file({ path: abs, content: w.content || '' });
         if (!r?.success) throw new Error(r?.error || 'Write failed');
         okCount += 1;
-        logAction('write_file', w.path, true);
-      } catch {
+        const clipped = clipText(w.content || '', 50000);
+        logAction('write_file', w.path, true, '', { path: w.path, content: clipped.text, truncated: clipped.truncated });
+      } catch (e) {
         failCount += 1;
-        logAction('write_file', w.path, false);
+        const clipped = clipText(w.content || '', 50000);
+        logAction('write_file', w.path, false, e?.message || String(e), { path: w.path, content: clipped.text, truncated: clipped.truncated });
       }
     }
 
@@ -546,11 +637,14 @@ window.AIManager = (() => {
         const r = await toolProtocol.apply_patch({ patch: p });
         if (!r?.success) throw new Error(r?.error || 'Patch failed');
         okCount += 1;
-        const names = (r.applied || []).map(x => x.file).filter(Boolean).join(', ');
-        logAction('apply_patch', names || 'patch', true);
-      } catch {
+        const files = (r.applied || []).map(x => x.file).filter(Boolean);
+        const names = files.join(', ');
+        const clipped = clipText(p || '', 80000);
+        logAction('apply_patch', names || 'patch', true, '', { files, patch: clipped.text, truncated: clipped.truncated });
+      } catch (e) {
         failCount += 1;
-        logAction('apply_patch', 'patch', false);
+        const clipped = clipText(p || '', 80000);
+        logAction('apply_patch', 'patch', false, e?.message || String(e), { files: [], patch: clipped.text, truncated: clipped.truncated });
       }
     }
 
@@ -770,10 +864,12 @@ window.AIManager = (() => {
     const tv = document.getElementById('cap-turbovec');
     const piper = document.getElementById('cap-piper');
     const perf = document.getElementById('cap-perf');
+    const ac = document.getElementById('cap-autoclear');
     if (tq) tq.textContent = `TurboQuant: ${capabilities.turboQuant ? 'ON' : 'OFF'}`;
     if (tv) tv.textContent = `TurboVec: ${capabilities.turboVec ? 'ON' : 'OFF'}`;
     if (piper) piper.textContent = `Piper TTS: ${capabilities.piper ? 'ON' : 'OFF'}`;
     if (perf) perf.textContent = `Speed: ${String(perfMode || 'fast').toUpperCase()}`;
+    if (ac) ac.textContent = `AutoClear Log: ${actionLogAutoClear ? 'ON' : 'OFF'}`;
   }
 
   function getMaxTokensFor(pid) {
@@ -1137,14 +1233,16 @@ window.AIManager = (() => {
       store.get('ui.aiWebResearch', null),
       store.get('ui.aiAutoExecute', null),
       store.get('ui.aiActionLogFilter', 'all'),
+      store.get('ui.aiActionLogAutoClear', null),
       store.get('ai.capabilities', null),
       store.get('ai.perfMode', null),
-    ]).then(([c, s, r, ae, lf, cap, pm]) => {
+    ]).then(([c, s, r, ae, lf, acl, cap, pm]) => {
       if (c === true) panel.classList.add('ai-controls-hidden');
       if (s === true) panel.classList.add('ai-suggestions-hidden');
       if (typeof r === 'boolean') aiWebResearchEnabled = r;
       if (typeof ae === 'boolean') autoActionRequested = ae;
       if (lf === 'all' || lf === 'failed' || lf === 'approval') actionLogFilter = lf;
+      if (typeof acl === 'boolean') actionLogAutoClear = acl;
       if (cap && typeof cap === 'object') {
         capabilities = {
           turboQuant: cap.turboQuant !== false,
@@ -1156,6 +1254,10 @@ window.AIManager = (() => {
       updateAiHeaderToggles();
       updateCapabilitiesUI();
       setActionLogFilter(actionLogFilter);
+      if (actionLogAutoClear) {
+        actionLog.splice(0, actionLog.length);
+        renderActionLog();
+      }
       refreshGatePending().catch(() => {});
       window.silva?.store?.get?.('ui.aiActionLogOpen', false).then((open) => {
         const box = document.getElementById('ai-action-log-wrap');
@@ -1365,6 +1467,7 @@ window.AIManager = (() => {
       <span id="cap-turbovec" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle TurboVec capability">TurboVec: OFF</span>
       <span id="cap-piper" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Toggle Piper TTS capability">Piper TTS: OFF</span>
       <span id="cap-perf" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Cycle speed mode (fast/balanced/quality)">Speed: FAST</span>
+      <span id="cap-autoclear" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Auto-clear actions log on new session">AutoClear Log: OFF</span>
       <span id="cap-actionlog" style="background:var(--surface0);border:1px solid var(--surface1);padding:3px 8px;border-radius:999px;cursor:pointer" title="Show/hide executed actions log">Actions Log</span>
     </div>
   </div>
@@ -1382,6 +1485,8 @@ window.AIManager = (() => {
     <button id="btn-log-filter-approval" class="icon-btn" title="Show approval-needed actions" style="font-size:10px;padding:1px 6px;opacity:.65">Approval</button>
     <div style="flex:1"></div>
     <button id="btn-export-actions" class="icon-btn" title="Copy actions log as JSON">⧉</button>
+    <button id="btn-export-actions-file" class="icon-btn" title="Save actions log to file">💾</button>
+    <button id="btn-export-actions-md" class="icon-btn" title="Copy actions log as markdown">MD</button>
     <button id="btn-retry-actions" class="icon-btn" title="Retry failed commands">↻</button>
     <button id="btn-clear-actions" class="icon-btn" title="Clear actions log">✕</button>
   </div>
@@ -1447,6 +1552,8 @@ window.AIManager = (() => {
     document.getElementById('btn-log-filter-failed')?.addEventListener('click', () => setActionLogFilter('failed'));
     document.getElementById('btn-log-filter-approval')?.addEventListener('click', () => setActionLogFilter('approval'));
     document.getElementById('btn-export-actions')?.addEventListener('click', exportActionsLog);
+    document.getElementById('btn-export-actions-file')?.addEventListener('click', exportActionsLogToFile);
+    document.getElementById('btn-export-actions-md')?.addEventListener('click', exportActionsLogMarkdown);
     document.getElementById('ai-action-log')?.addEventListener('click', (e) => {
       const openBtn = e.target?.closest?.('.log-open-approvals');
       if (openBtn) { openApprovalsPanel(); return; }
@@ -1461,6 +1568,48 @@ window.AIManager = (() => {
         } else {
           window.notify?.('Open file failed (no project folder or invalid path).', 'warning');
         }
+        return;
+      }
+      const retryWriteBtn = e.target?.closest?.('.log-retry-write');
+      if (retryWriteBtn) {
+        const at = String(retryWriteBtn.getAttribute('data-at') || '').trim();
+        const entry = actionLog.find(x => String(x?.at) === at && x?.kind === 'write_file');
+        if (!entry?.payload) { window.notify?.('No write payload', 'warning'); return; }
+        let pj = null;
+        try { pj = JSON.parse(String(entry.payload)); } catch {}
+        const rel = String(pj?.path || entry.target || '').trim();
+        const root = window.FileTreeManager?.getRootPath?.() || '';
+        const abs = root ? resolvePathWithinRoot(root, rel) : null;
+        if (!abs) { window.notify?.('Retry write failed (no project folder or invalid path).', 'warning'); return; }
+        toolProtocol.write_file({ path: abs, content: String(pj?.content || '') })
+          .then((r) => { if (!r?.success) throw new Error(r?.error || 'Write failed'); logAction('retry_write', rel, true); })
+          .catch((err) => { logAction('retry_write', rel, false, err?.message || String(err)); });
+        return;
+      }
+      const retryPatchBtn = e.target?.closest?.('.log-retry-patch');
+      if (retryPatchBtn) {
+        const at = String(retryPatchBtn.getAttribute('data-at') || '').trim();
+        const entry = actionLog.find(x => String(x?.at) === at && x?.kind === 'apply_patch');
+        if (!entry?.payload) { window.notify?.('No patch payload', 'warning'); return; }
+        let pj = null;
+        try { pj = JSON.parse(String(entry.payload)); } catch {}
+        const patch = String(pj?.patch || '').trim();
+        if (!patch) { window.notify?.('No patch text', 'warning'); return; }
+        toolProtocol.apply_patch({ patch })
+          .then((r) => { if (!r?.success) throw new Error(r?.error || 'Patch failed'); logAction('retry_patch', 'patch', true); })
+          .catch((err) => { logAction('retry_patch', 'patch', false, err?.message || String(err)); });
+        return;
+      }
+      const showPatchBtn = e.target?.closest?.('.log-show-patch');
+      if (showPatchBtn) {
+        const at = String(showPatchBtn.getAttribute('data-at') || '').trim();
+        const entry = actionLog.find(x => String(x?.at) === at && x?.kind === 'apply_patch');
+        let pj = null;
+        try { pj = entry?.payload ? JSON.parse(String(entry.payload)) : null; } catch {}
+        const patch = String(pj?.patch || '').trim();
+        if (!patch) { window.notify?.('No patch text', 'warning'); return; }
+        const clipped = clipText(patch, 8000);
+        window.silva?.dialog?.showMessage?.({ title: 'Patch', message: clipped.truncated ? 'Patch (truncated)' : 'Patch', detail: clipped.text });
         return;
       }
       const copyPathBtn = e.target?.closest?.('.log-copy-path');
@@ -1505,6 +1654,7 @@ window.AIManager = (() => {
     document.getElementById('cap-turbovec')?.addEventListener('click', () => setCapability('turboVec', !capabilities.turboVec));
     document.getElementById('cap-piper')?.addEventListener('click', () => setCapability('piper', !capabilities.piper));
     document.getElementById('cap-perf')?.addEventListener('click', () => cyclePerfMode());
+    document.getElementById('cap-autoclear')?.addEventListener('click', toggleActionLogAutoClear);
     document.getElementById('btn-swap-providers').addEventListener('click', swapProviders);
     document.getElementById('btn-use-p1').addEventListener('click', () => setActive(1));
     document.getElementById('btn-use-p2').addEventListener('click', () => setActive(2));
@@ -3035,12 +3185,14 @@ window.AIManager = (() => {
             const r = await window.silva.fs.writeFile(abs, parseFileBlock.content || '');
             if (!r?.success) { window.notify?.(`Write failed: ${r?.error || 'error'}`, 'error'); return; }
             window.notify?.(`Wrote: ${rel}`, 'success');
-            logAction('write_file', rel, true);
+            const clipped = clipText(parseFileBlock.content || '', 50000);
+            logAction('write_file', rel, true, '', { path: rel, content: clipped.text, truncated: clipped.truncated });
             window.FileTreeManager?.refreshTree?.();
             window.EditorManager?.openFileByPath?.(abs);
           } catch (e) {
             window.notify?.(`Write failed: ${e.message || e}`, 'error');
-            logAction('write_file', parseFileBlock.path, false, e?.message || String(e));
+            const clipped = clipText(parseFileBlock.content || '', 50000);
+            logAction('write_file', parseFileBlock.path, false, e?.message || String(e), { path: parseFileBlock.path, content: clipped.text, truncated: clipped.truncated });
           }
         });
       }
@@ -3054,13 +3206,15 @@ window.AIManager = (() => {
             if (!r?.success) { window.notify?.(`Patch failed: ${r?.error || 'error'}`, 'error'); return; }
             const files = (r.applied || []).map(x => x.file).filter(Boolean);
             window.notify?.(files.length ? `Patched: ${files.join(', ')}` : 'Patch applied', 'success');
-            logAction('apply_patch', files.join(', ') || 'patch', true);
+            const clipped = clipText(code || '', 80000);
+            logAction('apply_patch', files.join(', ') || 'patch', true, '', { files, patch: clipped.text, truncated: clipped.truncated });
             window.FileTreeManager?.refreshTree?.();
             const firstAbs = r.applied?.[0]?.abs;
             if (firstAbs) window.EditorManager?.openFileByPath?.(firstAbs);
           } catch (e) {
             window.notify?.(`Patch failed: ${e.message || e}`, 'error');
-            logAction('apply_patch', 'patch', false, e?.message || String(e));
+            const clipped = clipText(code || '', 80000);
+            logAction('apply_patch', 'patch', false, e?.message || String(e), { files: [], patch: clipped.text, truncated: clipped.truncated });
           }
         });
       }
