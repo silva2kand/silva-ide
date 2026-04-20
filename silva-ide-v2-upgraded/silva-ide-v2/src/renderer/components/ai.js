@@ -99,6 +99,16 @@ window.AIManager = (() => {
   let gatePendingCount = 0;
   let actionLogFilter = 'all'; // all | failed | approval
 
+  function exportActionsLog() {
+    try {
+      const payload = JSON.stringify(actionLog, null, 2);
+      navigator.clipboard.writeText(payload);
+      window.notify?.(`Actions log copied (${actionLog.length})`, 'success');
+    } catch (e) {
+      window.notify?.(`Export failed: ${e?.message || e}`, 'error');
+    }
+  }
+
   function isApprovalNeeded(entry) {
     if (!entry || entry.ok) return false;
     return /approval required|gateid=/i.test(String(entry.detail || ''));
@@ -144,6 +154,9 @@ window.AIManager = (() => {
       const openFileBtn = (x.kind === 'write_file' || x.kind === 'apply_patch') && (x.target || x.payload)
         ? `<button class="icon-btn log-open-file" data-file="${esc(String(x.target || x.payload || ''))}" title="Open file" style="margin-left:6px;font-size:10px;padding:1px 6px">Open File</button>`
         : '';
+      const copyPathBtn = (x.kind === 'write_file' || x.kind === 'apply_patch') && (x.target || x.payload)
+        ? `<button class="icon-btn log-copy-path" data-file="${esc(String(x.target || x.payload || ''))}" title="Copy file path" style="margin-left:6px;font-size:10px;padding:1px 6px">Copy Path</button>`
+        : '';
       const retryBtn = (!x.ok && x.kind === 'run_command' && (x.payload || x.target))
         ? `<button class="icon-btn log-retry-cmd" data-cmd="${esc(String(x.payload || x.target || ''))}" title="Retry this command" style="margin-left:6px;font-size:10px;padding:1px 6px">Retry</button>`
         : '';
@@ -161,6 +174,7 @@ window.AIManager = (() => {
         <span style="color:var(--overlay0)">${detail}</span>
         ${gateBtn}
         ${openFileBtn}
+        ${copyPathBtn}
         ${retryBtn}
         ${copyCmdBtn}
         ${copyGateBtn}
@@ -1367,6 +1381,7 @@ window.AIManager = (() => {
     <button id="btn-log-filter-failed" class="icon-btn" title="Show failed actions" style="font-size:10px;padding:1px 6px;opacity:.65">Failed</button>
     <button id="btn-log-filter-approval" class="icon-btn" title="Show approval-needed actions" style="font-size:10px;padding:1px 6px;opacity:.65">Approval</button>
     <div style="flex:1"></div>
+    <button id="btn-export-actions" class="icon-btn" title="Copy actions log as JSON">⧉</button>
     <button id="btn-retry-actions" class="icon-btn" title="Retry failed commands">↻</button>
     <button id="btn-clear-actions" class="icon-btn" title="Clear actions log">✕</button>
   </div>
@@ -1431,6 +1446,7 @@ window.AIManager = (() => {
     document.getElementById('btn-log-filter-all')?.addEventListener('click', () => setActionLogFilter('all'));
     document.getElementById('btn-log-filter-failed')?.addEventListener('click', () => setActionLogFilter('failed'));
     document.getElementById('btn-log-filter-approval')?.addEventListener('click', () => setActionLogFilter('approval'));
+    document.getElementById('btn-export-actions')?.addEventListener('click', exportActionsLog);
     document.getElementById('ai-action-log')?.addEventListener('click', (e) => {
       const openBtn = e.target?.closest?.('.log-open-approvals');
       if (openBtn) { openApprovalsPanel(); return; }
@@ -1445,6 +1461,13 @@ window.AIManager = (() => {
         } else {
           window.notify?.('Open file failed (no project folder or invalid path).', 'warning');
         }
+        return;
+      }
+      const copyPathBtn = e.target?.closest?.('.log-copy-path');
+      if (copyPathBtn) {
+        const file = String(copyPathBtn.getAttribute('data-file') || '').trim();
+        if (file) navigator.clipboard.writeText(file);
+        window.notify?.(file ? 'File path copied' : 'No file path', file ? 'success' : 'warning');
         return;
       }
       const copyBtn = e.target?.closest?.('.log-copy-gate');
