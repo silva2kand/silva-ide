@@ -97,6 +97,12 @@ window.AIManager = (() => {
   const pendingInserts = [];
   const actionLog = [];
   let gatePendingCount = 0;
+  let actionLogFilter = 'all'; // all | failed | approval
+
+  function isApprovalNeeded(entry) {
+    if (!entry || entry.ok) return false;
+    return /approval required|gateid=/i.test(String(entry.detail || ''));
+  }
 
   function logAction(kind, target, ok, detail = '', payload = null) {
     actionLog.unshift({
@@ -114,17 +120,22 @@ window.AIManager = (() => {
   function renderActionLog() {
     const el = document.getElementById('ai-action-log');
     if (!el) return;
-    if (!actionLog.length) {
+    const filtered = actionLog.filter((x) => {
+      if (actionLogFilter === 'failed') return !x.ok;
+      if (actionLogFilter === 'approval') return isApprovalNeeded(x);
+      return true;
+    });
+    if (!filtered.length) {
       el.innerHTML = '<div class="tl-empty">No executed actions yet</div>';
       return;
     }
-    const rows = actionLog.slice(0, 20).map((x) => {
+    const rows = filtered.slice(0, 20).map((x) => {
       const t = new Date(x.at).toLocaleTimeString();
       const status = x.ok ? 'OK' : 'FAIL';
       const color = x.ok ? 'var(--green)' : 'var(--red)';
       const target = esc(x.target || '(none)');
       const detail = x.detail ? ` · ${esc(x.detail)}` : '';
-      const needsApproval = !x.ok && /approval required|gateid=/i.test(String(x.detail || ''));
+      const needsApproval = isApprovalNeeded(x);
       const gateBtn = needsApproval
         ? `<button class="icon-btn log-open-approvals" title="Open pending approvals" style="margin-left:8px;font-size:10px;padding:1px 6px">Open Approvals</button>`
         : '';
@@ -138,6 +149,18 @@ window.AIManager = (() => {
       </div>`;
     });
     el.innerHTML = rows.join('');
+  }
+
+  function setActionLogFilter(mode) {
+    actionLogFilter = (mode === 'failed' || mode === 'approval') ? mode : 'all';
+    const all = document.getElementById('btn-log-filter-all');
+    const fail = document.getElementById('btn-log-filter-failed');
+    const ap = document.getElementById('btn-log-filter-approval');
+    [all, fail, ap].forEach((b) => { if (b) b.style.opacity = '0.65'; });
+    if (actionLogFilter === 'all' && all) all.style.opacity = '1';
+    if (actionLogFilter === 'failed' && fail) fail.style.opacity = '1';
+    if (actionLogFilter === 'approval' && ap) ap.style.opacity = '1';
+    renderActionLog();
   }
 
   function updateGateBadge(count) {
@@ -1318,6 +1341,9 @@ window.AIManager = (() => {
 <div id="ai-action-log-wrap" class="hidden" style="max-height:180px;overflow:auto;border-top:1px solid var(--surface0);border-bottom:1px solid var(--surface0);padding:8px;background:var(--base)">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
     <div style="font-size:10px;color:var(--overlay0);font-weight:800;letter-spacing:1px">EXECUTED ACTIONS</div>
+    <button id="btn-log-filter-all" class="icon-btn" title="Show all actions" style="font-size:10px;padding:1px 6px;opacity:1">All</button>
+    <button id="btn-log-filter-failed" class="icon-btn" title="Show failed actions" style="font-size:10px;padding:1px 6px;opacity:.65">Failed</button>
+    <button id="btn-log-filter-approval" class="icon-btn" title="Show approval-needed actions" style="font-size:10px;padding:1px 6px;opacity:.65">Approval</button>
     <div style="flex:1"></div>
     <button id="btn-retry-actions" class="icon-btn" title="Retry failed commands">↻</button>
     <button id="btn-clear-actions" class="icon-btn" title="Clear actions log">✕</button>
@@ -1380,6 +1406,9 @@ window.AIManager = (() => {
     document.getElementById('btn-open-approvals')?.addEventListener('click', openApprovalsPanel);
     document.getElementById('cap-approvals')?.addEventListener('click', openApprovalsPanel);
     document.getElementById('cap-actionlog')?.addEventListener('click', toggleActionLog);
+    document.getElementById('btn-log-filter-all')?.addEventListener('click', () => setActionLogFilter('all'));
+    document.getElementById('btn-log-filter-failed')?.addEventListener('click', () => setActionLogFilter('failed'));
+    document.getElementById('btn-log-filter-approval')?.addEventListener('click', () => setActionLogFilter('approval'));
     document.getElementById('ai-action-log')?.addEventListener('click', (e) => {
       const btn = e.target?.closest?.('.log-open-approvals');
       if (!btn) return;
