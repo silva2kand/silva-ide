@@ -124,12 +124,17 @@ window.AIManager = (() => {
       const color = x.ok ? 'var(--green)' : 'var(--red)';
       const target = esc(x.target || '(none)');
       const detail = x.detail ? ` · ${esc(x.detail)}` : '';
+      const needsApproval = !x.ok && /approval required|gateid=/i.test(String(x.detail || ''));
+      const gateBtn = needsApproval
+        ? `<button class="icon-btn log-open-approvals" title="Open pending approvals" style="margin-left:8px;font-size:10px;padding:1px 6px">Open Approvals</button>`
+        : '';
       return `<div style="font-size:11px;color:var(--subtext1);padding:4px 0;border-bottom:1px dashed var(--surface1)">
         <span style="color:var(--overlay0)">[${t}]</span>
         <span style="color:${color};font-weight:700;margin-left:6px">${status}</span>
         <span style="margin-left:6px">${esc(x.kind)}:</span>
         <span style="margin-left:4px">${target}</span>
         <span style="color:var(--overlay0)">${detail}</span>
+        ${gateBtn}
       </div>`;
     });
     el.innerHTML = rows.join('');
@@ -1284,6 +1289,7 @@ window.AIManager = (() => {
     <button class="qa-btn" data-action="review">Code Review</button>
     <button class="qa-btn" data-action="optimize">Optimize</button>
     <button class="qa-btn" data-action="security">Security</button>
+    <button class="qa-btn" data-action="codesniff">CodeSniff</button>
   </div>
 
   <div id="ai-capabilities" style="padding:8px;border-bottom:1px solid var(--surface0);display:flex;flex-direction:column;gap:6px">
@@ -1374,6 +1380,11 @@ window.AIManager = (() => {
     document.getElementById('btn-open-approvals')?.addEventListener('click', openApprovalsPanel);
     document.getElementById('cap-approvals')?.addEventListener('click', openApprovalsPanel);
     document.getElementById('cap-actionlog')?.addEventListener('click', toggleActionLog);
+    document.getElementById('ai-action-log')?.addEventListener('click', (e) => {
+      const btn = e.target?.closest?.('.log-open-approvals');
+      if (!btn) return;
+      openApprovalsPanel();
+    });
     document.getElementById('btn-retry-actions')?.addEventListener('click', () => retryFailedCommands());
     document.getElementById('btn-clear-actions')?.addEventListener('click', clearActionLog);
     document.getElementById('cap-turboquant')?.addEventListener('click', () => setCapability('turboQuant', !capabilities.turboQuant));
@@ -1425,6 +1436,7 @@ window.AIManager = (() => {
         review:   `Code review this ${fn} code. Check security, performance, best practices:\n\n\`\`\`\n${sel || '[select code first]'}\n\`\`\``,
         optimize: `Optimize this ${fn} code for maximum performance. Show complexity analysis:\n\n\`\`\`\n${sel || '[select code first]'}\n\`\`\``,
         security: `Security audit this ${fn} code. Find all vulnerabilities:\n\n\`\`\`\n${sel || '[select code first]'}\n\`\`\``,
+        codesniff: `Run a strict CodeSniff analysis on this ${fn} code and output only: (1) critical smells, (2) security issues, (3) performance hotspots, (4) maintainability violations, (5) exact fixes with patched snippets.\n\n\`\`\`\n${sel || '[select code first]'}\n\`\`\``,
       };
       document.getElementById('ai-input').value = prompts[b.dataset.action] || '';
       show(); document.getElementById('ai-input').focus();
