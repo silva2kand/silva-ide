@@ -97,13 +97,14 @@ window.AIManager = (() => {
   const pendingInserts = [];
   const actionLog = [];
 
-  function logAction(kind, target, ok, detail = '') {
+  function logAction(kind, target, ok, detail = '', payload = null) {
     actionLog.unshift({
       at: Date.now(),
       kind: String(kind || 'action'),
       target: String(target || ''),
       ok: !!ok,
       detail: String(detail || ''),
+      payload: payload === null || typeof payload === 'undefined' ? null : String(payload),
     });
     if (actionLog.length > 80) actionLog.pop();
     renderActionLog();
@@ -390,11 +391,11 @@ window.AIManager = (() => {
         if (!r?.success) throw new Error(r?.error || 'Command failed');
         okCount += 1;
         appendThinkLine(msgEl, `Executor: command queued (${c})`);
-        logAction('run_command', c, true);
+        logAction('run_command', c, true, '', c);
       } catch (e) {
         failCount += 1;
         appendThinkLine(msgEl, `Executor: command failed (${c}) (${e?.message || e})`);
-        logAction('run_command', c, false, e?.message || String(e));
+        logAction('run_command', c, false, e?.message || String(e), c);
       }
     }
 
@@ -466,10 +467,10 @@ window.AIManager = (() => {
         const r = await toolProtocol.run_command({ command: c, cwd: root || undefined });
         if (!r?.success) throw new Error(r?.error || 'Command failed');
         okCount += 1;
-        logAction('run_command', c, true);
+        logAction('run_command', c, true, '', c);
       } catch {
         failCount += 1;
-        logAction('run_command', c, false);
+        logAction('run_command', c, false, '', c);
       }
     }
 
@@ -1102,6 +1103,31 @@ window.AIManager = (() => {
     if (open) renderActionLog();
   }
 
+  function clearActionLog() {
+    actionLog.splice(0, actionLog.length);
+    renderActionLog();
+    window.notify?.('Actions log cleared', 'info');
+  }
+
+  async function retryFailedCommands() {
+    const failed = actionLog
+      .filter(x => x && x.ok === false && x.kind === 'run_command' && (x.payload || x.target))
+      .slice(0, 5);
+    if (!failed.length) { window.notify?.('No failed commands to retry', 'info'); return; }
+    for (const it of failed) {
+      const cmd = String(it.payload || it.target || '').trim();
+      if (!cmd) continue;
+      try {
+        const r = await toolProtocol.run_command({ command: cmd, cwd: window.FileTreeManager?.getRootPath?.() || undefined });
+        if (!r?.success) throw new Error(r?.error || 'Command failed');
+        logAction('retry_command', cmd, true);
+      } catch (e) {
+        logAction('retry_command', cmd, false, e?.message || String(e));
+      }
+    }
+    renderActionLog();
+  }
+
   async function setCapability(key, value) {
     capabilities = { ...capabilities, [key]: !!value };
     updateCapabilitiesUI();
@@ -1241,7 +1267,12 @@ window.AIManager = (() => {
 <div id="ai-messages"></div>
 
 <div id="ai-action-log-wrap" class="hidden" style="max-height:180px;overflow:auto;border-top:1px solid var(--surface0);border-bottom:1px solid var(--surface0);padding:8px;background:var(--base)">
-  <div style="font-size:10px;color:var(--overlay0);font-weight:800;letter-spacing:1px;margin-bottom:6px">EXECUTED ACTIONS</div>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+    <div style="font-size:10px;color:var(--overlay0);font-weight:800;letter-spacing:1px">EXECUTED ACTIONS</div>
+    <div style="flex:1"></div>
+    <button id="btn-retry-actions" class="icon-btn" title="Retry failed commands">↻</button>
+    <button id="btn-clear-actions" class="icon-btn" title="Clear actions log">✕</button>
+  </div>
   <div id="ai-action-log"><div class="tl-empty">No executed actions yet</div></div>
 </div>
 
@@ -1298,6 +1329,8 @@ window.AIManager = (() => {
     document.getElementById('btn-toggle-auto-actions')?.addEventListener('click', toggleAutoActions);
     document.getElementById('cap-autoexec')?.addEventListener('click', toggleAutoActions);
     document.getElementById('cap-actionlog')?.addEventListener('click', toggleActionLog);
+    document.getElementById('btn-retry-actions')?.addEventListener('click', () => retryFailedCommands());
+    document.getElementById('btn-clear-actions')?.addEventListener('click', clearActionLog);
     document.getElementById('cap-turboquant')?.addEventListener('click', () => setCapability('turboQuant', !capabilities.turboQuant));
     document.getElementById('cap-turbovec')?.addEventListener('click', () => setCapability('turboVec', !capabilities.turboVec));
     document.getElementById('cap-piper')?.addEventListener('click', () => setCapability('piper', !capabilities.piper));
